@@ -10,6 +10,7 @@ import { Navigation } from './Navigation.js';
 import { MusicSystem } from './Music.js';
 import { RemotePlayer } from './RemotePlayer.js';
 import { Effects } from './Effects.js';
+import { Police } from './Police.js';
 import { GAME, CELL_SIZE, GRID_SIZE, TRAFFIC_LIGHT, LEVELS, FARE } from './constants.js';
 
 export class Game {
@@ -149,6 +150,23 @@ export class Game {
         'Monsoon aayo!',
         'Chhata lyaunu parne!',
       ],
+      policeChase: [
+        'Police aayo! Bhaga!',
+        'Siren bajyo! Chhito!',
+        'Dai, police pichha lagyo!',
+        'Traffic police! Bhaga bhaga!',
+      ],
+      policeCaught: [
+        'Samatyo! Fine tirnu paryo!',
+        'Police le rokyo!',
+        'Pakrayo dai!',
+        'License dekhau dai!',
+      ],
+      policeEscaped: [
+        'Bachyo! Kya speed!',
+        'Police chhutyo!',
+        'Escape garyo dai!',
+      ],
     };
 
     // Systems
@@ -162,6 +180,11 @@ export class Game {
     this.navigation = new Navigation(scene, this.city);
     this.music = new MusicSystem();
     this.effects = new Effects(scene);
+    this.police = new Police(scene, this.city, null); // music ref set after init
+
+    // Freeze state (police caught)
+    this.frozen = false;
+    this.freezeTimer = 0;
 
     // Exhaust particles
     this.exhaustParticles = [];
@@ -422,9 +445,15 @@ export class Game {
       if (mpSb) mpSb.style.display = 'block';
     }
 
+    // Police
+    this.police.reset();
+    this.frozen = false;
+    this.freezeTimer = 0;
+
     // Music
     this.music.init();
     this.music.resume();
+    this.police.music = this.music;
   }
 
   // --- Slow-motion ---
@@ -501,6 +530,22 @@ export class Game {
     if (this.redLightCooldown > 0) this.redLightCooldown -= delta;
     if (this.crashFineCooldown > 0) this.crashFineCooldown -= delta;
 
+    // Freeze state (police caught player)
+    if (this.frozen) {
+      this.freezeTimer -= delta;
+      if (this.freezeTimer <= 0) {
+        this.frozen = false;
+      }
+      // Still update camera and UI while frozen, but skip vehicle input
+      this.vehicle.speed *= 0.9; // bleed off speed
+      this.updateCamera(delta);
+      this.updateUI();
+      if (this.mode === 'single') this.updateMinimap();
+      // Keep police visible during freeze
+      this.police.update(delta, this.vehicle.position, this.city.getBuildingBounds());
+      return;
+    }
+
     // Input (in versus mode, arrows are P2-only)
     const isVs = this.mode === 'versus';
     const input = {
@@ -572,7 +617,7 @@ export class Game {
       }
     }
     if (!input.fire) this._fireCooldown = false;
-    this.projectiles.update(delta, this.traffic, this.wildlife);
+    this.projectiles.update(delta, this.traffic, this.wildlife, this.police);
 
     // Navigation arrows
     const navTarget = this.passengers.getDropoffPosition() || this.passengers.getPickupPosition();
@@ -619,6 +664,27 @@ export class Game {
 
     // Dynamic events
     this.updateDynamicEvents(delta);
+
+    // Police chase
+    const policeResult = this.police.update(delta, this.vehicle.position, this.city.getBuildingBounds());
+    if (policeResult) {
+      if (policeResult.type === 'caught') {
+        const fine = 500;
+        this.score = Math.max(0, this.score - fine);
+        this.fines += fine;
+        this.frozen = true;
+        this.freezeTimer = 5;
+        this.shakeIntensity = 0.6;
+        this.showDialogue('policeCaught');
+        this.showPoliceFine(fine);
+        this.music.playViolation();
+      } else if (policeResult.type === 'escaped') {
+        const bonus = 50;
+        this.score += bonus;
+        this.showPassengerInfo(`${this.getDialogue('policeEscaped')} +Rs. ${bonus}`);
+        setTimeout(() => this.hidePassengerInfo(), 2000);
+      }
+    }
 
     // Wind sound
     if (this.music.updateWind) {
@@ -787,6 +853,12 @@ export class Game {
           this.showDialogue('crash');
           this.showViolation();
           this.music.playViolation();
+
+          // High-speed crash triggers police
+          if (vSpeed > 30 && !this.police.isActive()) {
+            this.police.activate(this.vehicle.position);
+            this.showDialogue('policeChase');
+          }
         }
       } else if (dist < GAME.nearMissDistance + npc.radius && vSpeed > 15) {
         if (!npc._nmCd || npc._nmCd <= 0) {
@@ -836,6 +908,12 @@ export class Game {
       this.showViolation();
       this.showDialogue('redLight');
       this.music.playViolation();
+
+      // Trigger police after 3+ violations
+      if (this.violations >= 3 && !this.police.isActive()) {
+        this.police.activate(this.vehicle.position);
+        this.showDialogue('policeChase');
+      }
     }
 
     this.wasInRedZone = isInRedZone;
@@ -1382,6 +1460,20 @@ export class Game {
       ctx.fill();
     }
 
+    // Police
+    if (this.police.isActive()) {
+      const flash = Math.sin(performance.now() * 0.008) > 0;
+      ctx.fillStyle = flash ? '#ff0000' : '#0044ff';
+      ctx.beginPath();
+      ctx.arc(this.police.position.x * s, this.police.position.z * s, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = flash ? 'rgba(255,0,0,.4)' : 'rgba(0,68,255,.4)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(this.police.position.x * s, this.police.position.z * s, 10, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
     // Trail
     if (this.trail.length > 1) {
       ctx.strokeStyle = 'rgba(255,68,68,.25)';
@@ -1539,6 +1631,26 @@ export class Game {
       ctx.fill();
     }
 
+    // Police (flashing red/blue blip)
+    if (this.police.isActive()) {
+      const px = wx(this.police.position.x);
+      const pz = wz(this.police.position.z);
+      if (Math.abs(px) <= cx && Math.abs(pz) <= cy) {
+        const flash = Math.sin(time * 8) > 0;
+        ctx.fillStyle = flash ? '#ff0000' : '#0044ff';
+        ctx.beginPath();
+        ctx.arc(px, pz, 4, 0, Math.PI * 2);
+        ctx.fill();
+        // Pulse ring
+        const pulse = 6 + Math.sin(time * 4) * 2;
+        ctx.strokeStyle = flash ? 'rgba(255,0,0,.3)' : 'rgba(0,68,255,.3)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(px, pz, pulse, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
     // Time bonuses
     ctx.fillStyle = '#22d3ee';
     for (const tb of this.timeBonuses) {
@@ -1677,6 +1789,18 @@ export class Game {
 
     const el = this.ui.violationText;
     el.textContent = `RED LIGHT! -Rs. ${TRAFFIC_LIGHT.fineAmount}`;
+    el.style.animation = 'none';
+    el.offsetHeight;
+    el.style.animation = 'violationTextAnim 1.2s ease-out forwards';
+  }
+
+  showPoliceFine(amount) {
+    this.ui.violationFlash.classList.remove('active');
+    this.ui.violationFlash.offsetHeight;
+    this.ui.violationFlash.classList.add('active');
+
+    const el = this.ui.violationText;
+    el.textContent = `BUSTED! -Rs. ${amount}`;
     el.style.animation = 'none';
     el.offsetHeight;
     el.style.animation = 'violationTextAnim 1.2s ease-out forwards';
@@ -1979,6 +2103,7 @@ export class Game {
     if (mpSb) mpSb.style.display = 'none';
 
     // Cleanup
+    this.police.reset();
     this.projectiles.reset();
     this.effects.cleanup();
     for (const ev of this.activeEvents) {

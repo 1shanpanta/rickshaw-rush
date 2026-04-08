@@ -73,7 +73,7 @@ export class Projectiles {
     return true;
   }
 
-  update(delta, traffic, wildlife) {
+  update(delta, traffic, wildlife, police) {
     // Update balloons
     for (let i = this.balloons.length - 1; i >= 0; i--) {
       const b = this.balloons[i];
@@ -118,6 +118,16 @@ export class Projectiles {
             hit = true;
             break;
           }
+        }
+      }
+
+      // Hit police
+      if (!hit && police && police.isActive()) {
+        const dx = b.position.x - police.position.x;
+        const dz = b.position.z - police.position.z;
+        if (dx * dx + dz * dz < 9) { // radius ~3
+          hit = true;
+          police.hitByBalloon();
         }
       }
 
