@@ -1,5 +1,5 @@
 export const CELL_SIZE = 22;
-export const GRID_SIZE = 24;
+export const GRID_SIZE = 40;
 
 export const COLORS = {
   road: 0x3a3a3a,

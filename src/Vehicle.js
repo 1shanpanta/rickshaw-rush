@@ -241,8 +241,12 @@ export class Vehicle {
     this.position.x += Math.sin(this.rotation) * this.speed * delta;
     this.position.z += Math.cos(this.rotation) * this.speed * delta;
 
+    // Terrain height (set by Game each frame via city.getTerrainHeight)
+    const terrainY = this.terrainHeight || 0;
+    this.position.y = terrainY;
+
     // Mesh update
-    this.mesh.position.set(this.position.x, 0, this.position.z);
+    this.mesh.position.set(this.position.x, terrainY, this.position.z);
     this.mesh.rotation.y = this.rotation;
 
     // Tilt

@@ -624,6 +624,7 @@ export class Game {
     };
 
     // Vehicle
+    this.vehicle.terrainHeight = this.city.getTerrainHeight(this.vehicle.position.x, this.vehicle.position.z);
     this.vehicle.update(delta, input);
 
     // Honk

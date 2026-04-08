@@ -22,6 +22,51 @@ export class City {
     this.buildPigeonGroups();
   }
 
+  // Terrain height at any world position — gentle rolling hills
+  // Roads and their neighbors are flattened; hills only in building/grass areas
+  getTerrainHeight(worldX, worldZ) {
+    const citySize = GRID_SIZE * CELL_SIZE;
+    // Normalize to 0-1
+    const nx = worldX / citySize;
+    const nz = worldZ / citySize;
+
+    // Layered sine hills
+    let h = 0;
+    h += Math.sin(nx * 3.5 + 0.3) * Math.cos(nz * 2.8 + 0.7) * 4;
+    h += Math.sin(nx * 7.1 + 1.2) * Math.cos(nz * 5.3 + 2.1) * 1.8;
+    h += Math.sin(nx * 12 + 0.5) * Math.sin(nz * 11 + 1.5) * 0.6;
+
+    // Flatten near roads — check grid cell
+    const gx = Math.floor(worldX / CELL_SIZE);
+    const gz = Math.floor(worldZ / CELL_SIZE);
+    if (gx >= 0 && gx < GRID_SIZE && gz >= 0 && gz < GRID_SIZE) {
+      if (this.grid[gx][gz] === 'road' || this.grid[gx][gz] === 'temple') {
+        // Fully flatten roads and temple
+        return 0;
+      }
+      // Check if any neighbor is a road — blend to flat
+      let nearRoad = false;
+      for (const [dx, dz] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+        const nx2 = gx + dx;
+        const nz2 = gz + dz;
+        if (nx2 >= 0 && nx2 < GRID_SIZE && nz2 >= 0 && nz2 < GRID_SIZE) {
+          if (this.grid[nx2][nz2] === 'road') { nearRoad = true; break; }
+        }
+      }
+      if (nearRoad) {
+        // Smooth blend: reduce height near roads
+        const cellLocalX = (worldX / CELL_SIZE - gx) - 0.5;
+        const cellLocalZ = (worldZ / CELL_SIZE - gz) - 0.5;
+        const edgeDist = Math.min(Math.abs(cellLocalX), Math.abs(cellLocalZ));
+        const blend = Math.min(edgeDist * 3, 1); // 0 at edge (flat), 1 at center (full height)
+        return h * blend * 0.5;
+      }
+    }
+
+    // Outside city bounds — gentle hills
+    return Math.max(0, h);
+  }
+
   generateGrid() {
     for (let x = 0; x < GRID_SIZE; x++) {
       this.grid[x] = [];
@@ -48,11 +93,24 @@ export class City {
 
   buildGround() {
     const size = GRID_SIZE * CELL_SIZE;
-    const geo = new THREE.PlaneGeometry(size + 80, size + 80);
+    const segments = 80;
+    const totalSize = size + 120;
+    const geo = new THREE.PlaneGeometry(totalSize, totalSize, segments, segments);
+    geo.rotateX(-Math.PI / 2);
+
+    // Displace vertices using terrain height
+    const pos = geo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const wx = pos.getX(i) + size / 2;
+      const wz = pos.getZ(i) + size / 2;
+      const h = this.getTerrainHeight(wx, wz);
+      pos.setY(i, h - 0.05);
+    }
+    geo.computeVertexNormals();
+
     const mat = new THREE.MeshLambertMaterial({ color: COLORS.grass });
     const ground = new THREE.Mesh(geo, mat);
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.set(size / 2, -0.05, size / 2);
+    ground.position.set(size / 2, 0, size / 2);
     ground.receiveShadow = true;
     this.scene.add(ground);
   }
@@ -138,10 +196,11 @@ export class City {
     const px = gx * CELL_SIZE + CELL_SIZE / 2;
     const pz = gz * CELL_SIZE + CELL_SIZE / 2;
 
+    const terrainY = this.getTerrainHeight(px, pz);
     const geo = new THREE.BoxGeometry(width, height, depth);
     const mat = new THREE.MeshLambertMaterial({ color });
     const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(px, height / 2, pz);
+    mesh.position.set(px, terrainY + height / 2, pz);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     this.scene.add(mesh);
@@ -152,7 +211,7 @@ export class City {
       new THREE.BoxGeometry(width + 0.6, 0.4, depth + 0.6),
       new THREE.MeshLambertMaterial({ color: edgeColor })
     );
-    edge.position.set(px, height + 0.2, pz);
+    edge.position.set(px, terrainY + height + 0.2, pz);
     this.scene.add(edge);
 
     // Window grid
@@ -662,17 +721,24 @@ export class City {
   buildMountains() {
     const cityWidth = GRID_SIZE * CELL_SIZE;
     const peaks = [
-      { x: -80,  z: -100, h: 95,  r: 55 },
-      { x: -30,  z: -130, h: 110, r: 50 },
-      { x: 20,   z: -90,  h: 65,  r: 35 },
-      { x: 70,   z: -140, h: 120, r: 60 },
-      { x: 130,  z: -110, h: 85,  r: 45 },
-      { x: 190,  z: -80,  h: 50,  r: 30 },
-      { x: 250,  z: -120, h: 105, r: 55 },
-      { x: 310,  z: -95,  h: 75,  r: 40 },
-      { x: 370,  z: -150, h: 115, r: 58 },
-      { x: cityWidth + 30, z: -100, h: 90, r: 50 },
-      { x: cityWidth + 80, z: -130, h: 70, r: 38 },
+      // North range (behind city)
+      { x: -80,  z: -120, h: 110, r: 65 },
+      { x: 50,   z: -160, h: 140, r: 70 },
+      { x: 180,  z: -100, h: 85,  r: 45 },
+      { x: 300,  z: -150, h: 130, r: 65 },
+      { x: 440,  z: -130, h: 100, r: 55 },
+      { x: 580,  z: -110, h: 120, r: 60 },
+      { x: 720,  z: -160, h: 145, r: 70 },
+      { x: cityWidth + 50, z: -120, h: 95, r: 50 },
+      // East range
+      { x: cityWidth + 80, z: 100, h: 80, r: 50 },
+      { x: cityWidth + 60, z: 300, h: 70, r: 40 },
+      { x: cityWidth + 90, z: 500, h: 90, r: 55 },
+      { x: cityWidth + 70, z: 700, h: 75, r: 45 },
+      // West range
+      { x: -90,  z: 200, h: 70, r: 45 },
+      { x: -70,  z: 450, h: 85, r: 50 },
+      { x: -100, z: 650, h: 60, r: 35 },
     ];
 
     const mountainColors = [0x2a3040, 0x2f2a40, 0x33304a, 0x3a2a4a, 0x2e3545];

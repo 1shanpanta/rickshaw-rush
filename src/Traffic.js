@@ -19,7 +19,7 @@ export class Traffic {
     this.city = city;
     this.trafficLights = trafficLights;
     this.vehicles = [];
-    this.baseCounts = { bus: 10, microbus: 8, motorcycle: 25, scooter: 15, tempo: 6, cow: 8, car: 20, truck: 5, bicycle: 10 };
+    this.baseCounts = { bus: 18, microbus: 14, motorcycle: 45, scooter: 25, tempo: 10, cow: 14, car: 35, truck: 8, bicycle: 18 };
     this.spawnTraffic(this.baseCounts);
   }
 

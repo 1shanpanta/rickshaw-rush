@@ -51,7 +51,7 @@ renderer.toneMappingExposure = 1.1;
 document.body.prepend(renderer.domElement);
 
 // --- Camera ---
-const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 600);
+const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 1000);
 
 // --- Post-processing ---
 const composer = new EffectComposer(renderer);
@@ -75,15 +75,15 @@ scene.add(new THREE.AmbientLight(0xffffff, 0.5));
 scene.add(new THREE.HemisphereLight(0x87ceeb, 0x5a8c4b, 0.3));
 
 const sun = new THREE.DirectionalLight(0xfff4e0, 0.9);
-sun.position.set(80, 100, 60);
+sun.position.set(150, 120, 100);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.camera.near = 1;
-sun.shadow.camera.far = 300;
-sun.shadow.camera.left = -140;
-sun.shadow.camera.right = 140;
-sun.shadow.camera.top = 140;
-sun.shadow.camera.bottom = -140;
+sun.shadow.camera.far = 500;
+sun.shadow.camera.left = -200;
+sun.shadow.camera.right = 200;
+sun.shadow.camera.top = 200;
+sun.shadow.camera.bottom = -200;
 sun.shadow.bias = -0.001;
 scene.add(sun);
 
@@ -370,8 +370,8 @@ let menuAngle = 0;
 const menuAnimateInterval = setInterval(() => {
   if (game.state === 'menu') {
     menuAngle += 0.003;
-    const cityCenter = 12 * 22;
-    const radius = 120;
+    const cityCenter = 20 * 22;
+    const radius = 200;
     camera.position.set(
       cityCenter + Math.sin(menuAngle) * radius,
       40 + Math.sin(menuAngle * 0.5) * 10,

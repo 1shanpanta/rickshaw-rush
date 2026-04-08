@@ -2,12 +2,12 @@ import * as THREE from 'three';
 import { CELL_SIZE, GRID_SIZE } from './constants.js';
 
 const ANIMAL_TYPES = {
-  dog: { w: 0.6, h: 0.5, l: 0.9, color: 0x8b6914, speed: 3, count: 8 },
-  monkey: { w: 0.4, h: 0.5, l: 0.4, color: 0xa0522d, speed: 6, count: 5 },
-  elephant: { w: 2.5, h: 3, l: 4, color: 0x808080, speed: 2, count: 2 },
-  rhino: { w: 1.8, h: 1.8, l: 3, color: 0x696969, speed: 2.5, count: 1 },
-  goat: { w: 0.5, h: 0.6, l: 0.8, color: 0xf5f5dc, speed: 2.5, count: 6 },
-  chicken: { w: 0.3, h: 0.4, l: 0.35, color: 0xdaa520, speed: 4, count: 8 },
+  dog: { w: 0.6, h: 0.5, l: 0.9, color: 0x8b6914, speed: 3, count: 14 },
+  monkey: { w: 0.4, h: 0.5, l: 0.4, color: 0xa0522d, speed: 6, count: 9 },
+  elephant: { w: 2.5, h: 3, l: 4, color: 0x808080, speed: 2, count: 3 },
+  rhino: { w: 1.8, h: 1.8, l: 3, color: 0x696969, speed: 2.5, count: 2 },
+  goat: { w: 0.5, h: 0.6, l: 0.8, color: 0xf5f5dc, speed: 2.5, count: 10 },
+  chicken: { w: 0.3, h: 0.4, l: 0.35, color: 0xdaa520, speed: 4, count: 14 },
 };
 
 export class Wildlife {
