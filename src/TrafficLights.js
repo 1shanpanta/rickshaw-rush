@@ -6,6 +6,8 @@ export class TrafficLights {
     this.scene = scene;
     this.city = city;
     this.lights = [];
+    this.powerCut = false;
+    this.powerCutTimer = 0;
     this.createLights();
   }
 
@@ -93,7 +95,45 @@ export class TrafficLights {
     };
   }
 
+  startPowerCut(duration) {
+    this.powerCut = true;
+    this.powerCutTimer = duration;
+    for (const l of this.lights) {
+      l.state = 'off';
+      l.meshes.red.material.color.setHex(0x220000);
+      l.meshes.yellow.material.color.setHex(0x221100);
+      l.meshes.green.material.color.setHex(0x002200);
+      l.glowMat.opacity = 0;
+    }
+  }
+
+  endPowerCut() {
+    this.powerCut = false;
+    this.powerCutTimer = 0;
+  }
+
   update(delta) {
+    // Power cut countdown
+    if (this.powerCut) {
+      this.powerCutTimer -= delta;
+      if (this.powerCutTimer <= 0) {
+        this.endPowerCut();
+      } else {
+        // Flicker effect — random lights briefly flash
+        for (const l of this.lights) {
+          if (Math.random() < 0.002) {
+            const flicker = Math.random() > 0.5 ? 0xff0000 : 0xffcc00;
+            l.meshes.red.material.color.setHex(flicker === 0xff0000 ? 0x440000 : 0x220000);
+            l.meshes.yellow.material.color.setHex(flicker === 0xffcc00 ? 0x443300 : 0x221100);
+          } else {
+            l.meshes.red.material.color.setHex(0x220000);
+            l.meshes.yellow.material.color.setHex(0x221100);
+          }
+        }
+        return;
+      }
+    }
+
     const gD = TRAFFIC_LIGHT.greenDuration;
     const yD = TRAFFIC_LIGHT.yellowDuration;
     const rD = TRAFFIC_LIGHT.redDuration;
@@ -125,6 +165,7 @@ export class TrafficLights {
   }
 
   getStateAt(position) {
+    if (this.powerCut) return null;
     for (const l of this.lights) {
       const dx = position.x - l.position.x;
       const dz = position.z - l.position.z;
@@ -134,6 +175,8 @@ export class TrafficLights {
     }
     return null;
   }
+
+  isPowerCut() { return this.powerCut; }
 
   getLights() {
     return this.lights;

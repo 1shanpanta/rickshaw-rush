@@ -106,6 +106,23 @@ export class Game {
     this.crashFineCooldown = 0;
     this.crashFineAmount = 30;
 
+    // Power cut event
+    this.powerCutCooldown = 45;
+
+    // Construction zones
+    this.constructionZones = [];
+    this.constructionSpawnTimer = 30;
+
+    // Pedestrian crowds
+    this.pedestrianCrowds = [];
+
+    // Festival mode
+    this.festivalMode = false;
+    this.festivalLights = [];
+
+    // Vehicle upgrades (persistent between runs)
+    this.upgrades = JSON.parse(localStorage.getItem('rickshaw-rush-upgrades') || '{"speed":0,"brakes":0,"earnings":0,"boost":0}');
+
     // Nepali dialogues
     this.dialogueTimer = 0;
     this.dialogues = {
@@ -167,6 +184,21 @@ export class Game {
         'Bachyo! Kya speed!',
         'Police chhutyo!',
         'Escape garyo dai!',
+      ],
+      powerCut: [
+        'Batti gayo!',
+        'Load shedding aayo!',
+        'Andhyaro bhayo!',
+      ],
+      construction: [
+        'Bato banda chha!',
+        'Construction zone! Arko bato lau!',
+        'Road block! Ghumera jau!',
+      ],
+      festival: [
+        'Dashain aayo! Badhai chha!',
+        'Tihar ko ramailo!',
+        'Deusi re bhailo!',
       ],
     };
 
@@ -425,6 +457,32 @@ export class Game {
     this._duskBellPlayed = false;
     if (this.ui.fullmap) this.ui.fullmap.style.display = 'none';
 
+    // Power cut
+    this.powerCutCooldown = 45;
+    this.trafficLights.endPowerCut();
+
+    // Construction zones
+    for (const cz of this.constructionZones) {
+      for (const m of cz.meshes) this.scene.remove(m);
+    }
+    this.constructionZones = [];
+    this.constructionSpawnTimer = 30;
+
+    // Pedestrian crowds
+    for (const pc of this.pedestrianCrowds) {
+      for (const m of pc.meshes) this.scene.remove(m);
+    }
+    this.pedestrianCrowds = [];
+    this.spawnPedestrianCrowds();
+
+    // Festival mode
+    this.festivalMode = false;
+    for (const fl of this.festivalLights) this.scene.remove(fl);
+    this.festivalLights = [];
+
+    // Apply vehicle upgrades
+    this.applyUpgrades();
+
     // UI
     this.ui.overlay.classList.add('hidden');
     this.ui.hud.style.display = 'flex';
@@ -677,6 +735,15 @@ export class Game {
 
     // Dynamic events
     this.updateDynamicEvents(delta);
+
+    // Power cut event
+    this.updatePowerCut(delta);
+
+    // Construction zones
+    this.updateConstructionZones(delta);
+
+    // Pedestrian crowds
+    this.updatePedestrianCrowds(delta);
 
     // Police chase
     const policeResult = this.police.update(delta, this.vehicle.position, this.city.getBuildingBounds());
@@ -944,7 +1011,9 @@ export class Game {
       this.combo = Math.min(this.combo + 1, GAME.comboMultipliers.length - 1);
       this.comboTimer = GAME.comboWindow;
       const mult = GAME.comboMultipliers[this.combo];
-      const finalReward = Math.round(result.reward * mult);
+      const festivalBonus = this.festivalMode ? 2 : 1;
+      const earningsMod = this.earningsMultiplier || 1;
+      const finalReward = Math.round(result.reward * mult * festivalBonus * earningsMod);
 
       this.score += finalReward;
       this.deliveries++;
@@ -1006,6 +1075,11 @@ export class Game {
 
     // Trigger rain at certain levels
     if (this.level === 3 && !this.isRaining) this.startRain();
+
+    // Festival mode at level 5+
+    if (this.level >= 5 && !this.festivalMode) {
+      this.activateFestivalMode();
+    }
   }
 
   // --- Weather ---
@@ -2082,6 +2156,435 @@ export class Game {
     }
   }
 
+  // --- Power Cut ---
+  updatePowerCut(delta) {
+    if (this.trafficLights.isPowerCut()) return;
+    this.powerCutCooldown -= delta;
+    if (this.powerCutCooldown <= 0) {
+      this.powerCutCooldown = 40 + Math.random() * 30;
+      const duration = 10 + Math.random() * 8;
+      this.trafficLights.startPowerCut(duration);
+      this.showDialogue('powerCut');
+      this.showPassengerInfo('LOAD SHEDDING! Traffic lights are out!');
+      setTimeout(() => this.hidePassengerInfo(), 2500);
+    }
+  }
+
+  // --- Construction Zones ---
+  updateConstructionZones(delta) {
+    this.constructionSpawnTimer -= delta;
+    if (this.constructionSpawnTimer <= 0 && this.constructionZones.length < 3) {
+      this.constructionSpawnTimer = 25 + Math.random() * 20;
+      this.spawnConstructionZone();
+    }
+
+    const vPos = this.vehicle.position;
+    for (let i = this.constructionZones.length - 1; i >= 0; i--) {
+      const cz = this.constructionZones[i];
+      cz.life -= delta;
+
+      // Animate barrier stripes
+      for (const mesh of cz.meshes) {
+        if (mesh.userData.isBarrier) {
+          mesh.rotation.y += delta * 0.1;
+        }
+      }
+
+      // Collision with player
+      const dx = vPos.x - cz.position.x;
+      const dz = vPos.z - cz.position.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist < cz.radius) {
+        const push = cz.radius - dist;
+        if (dist > 0.01) {
+          vPos.x += (dx / dist) * push * 0.8;
+          vPos.z += (dz / dist) * push * 0.8;
+        }
+        this.vehicle.speed *= 0.3;
+        this.shakeIntensity = 0.15;
+      }
+
+      if (cz.life <= 0) {
+        for (const m of cz.meshes) this.scene.remove(m);
+        this.constructionZones.splice(i, 1);
+      }
+    }
+  }
+
+  spawnConstructionZone() {
+    const roads = this.city.getRoadPositions();
+    const playerPos = this.vehicle.position;
+
+    // Pick a road far enough from player
+    let rp;
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const candidate = roads[Math.floor(Math.random() * roads.length)];
+      const dx = candidate.x - playerPos.x;
+      const dz = candidate.z - playerPos.z;
+      if (dx * dx + dz * dz > 2500) { // at least 50 units away
+        rp = candidate;
+        break;
+      }
+    }
+    if (!rp) return;
+
+    const meshes = [];
+
+    // Orange barriers (4 barriers in a square)
+    for (let i = 0; i < 4; i++) {
+      const angle = (i / 4) * Math.PI * 2;
+      const bx = rp.x + Math.cos(angle) * 4;
+      const bz = rp.z + Math.sin(angle) * 4;
+
+      const barrier = new THREE.Group();
+
+      // Post
+      const post = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.1, 0.1, 2, 6),
+        new THREE.MeshLambertMaterial({ color: 0xff6600 })
+      );
+      post.position.y = 1;
+      barrier.add(post);
+
+      // Striped bar
+      const bar = new THREE.Mesh(
+        new THREE.BoxGeometry(3, 0.3, 0.15),
+        new THREE.MeshLambertMaterial({ color: 0xff8800 })
+      );
+      bar.position.y = 1.8;
+      barrier.add(bar);
+
+      // Black stripe
+      const stripe = new THREE.Mesh(
+        new THREE.BoxGeometry(1.2, 0.3, 0.16),
+        new THREE.MeshBasicMaterial({ color: 0x111111 })
+      );
+      stripe.position.y = 1.8;
+      barrier.add(stripe);
+
+      barrier.position.set(bx, 0, bz);
+      barrier.rotation.y = angle;
+      barrier.userData.isBarrier = true;
+      this.scene.add(barrier);
+      meshes.push(barrier);
+    }
+
+    // Warning sign
+    const signCanvas = document.createElement('canvas');
+    signCanvas.width = 64;
+    signCanvas.height = 64;
+    const ctx = signCanvas.getContext('2d');
+    ctx.fillStyle = '#ff6600';
+    ctx.beginPath();
+    ctx.moveTo(32, 4);
+    ctx.lineTo(60, 56);
+    ctx.lineTo(4, 56);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#000';
+    ctx.font = 'bold 28px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('!', 32, 48);
+    const signTex = new THREE.CanvasTexture(signCanvas);
+    const sign = new THREE.Sprite(new THREE.SpriteMaterial({ map: signTex, transparent: true }));
+    sign.scale.set(3, 3, 1);
+    sign.position.set(rp.x, 4, rp.z);
+    this.scene.add(sign);
+    meshes.push(sign);
+
+    // Blinking light
+    const blinker = new THREE.PointLight(0xff6600, 2, 12);
+    blinker.position.set(rp.x, 3, rp.z);
+    this.scene.add(blinker);
+    meshes.push(blinker);
+
+    this.constructionZones.push({
+      position: rp.clone(),
+      radius: 6,
+      meshes,
+      life: 30 + Math.random() * 20,
+    });
+
+    this.showDialogue('construction');
+  }
+
+  // --- Pedestrian Crowds ---
+  spawnPedestrianCrowds() {
+    const citySize = GRID_SIZE * CELL_SIZE;
+
+    // Spawn clusters near building edges (market areas)
+    for (let x = 1; x < GRID_SIZE - 1; x++) {
+      for (let z = 1; z < GRID_SIZE - 1; z++) {
+        if (this.city.grid[x][z] !== 'building') continue;
+        // Only spawn near roads
+        const hasRoadNeighbor = this.city.isRoad(x - 1, z) || this.city.isRoad(x + 1, z) ||
+          this.city.isRoad(x, z - 1) || this.city.isRoad(x, z + 1);
+        if (!hasRoadNeighbor) continue;
+        if (Math.random() > 0.12) continue; // sparse spawning
+
+        const meshes = [];
+        const count = 3 + Math.floor(Math.random() * 4);
+        const cx = x * CELL_SIZE + CELL_SIZE / 2;
+        const cz = z * CELL_SIZE + CELL_SIZE * 0.1; // near road edge
+
+        for (let i = 0; i < count; i++) {
+          const g = new THREE.Group();
+          const skinColors = [0xc68642, 0x8d5524, 0xf1c27d, 0xe0ac69, 0xffdbac];
+          const clothColors = [0xdd3333, 0x3366cc, 0x22aa44, 0xcc6622, 0x9933cc, 0xcc2266, 0x2288aa];
+
+          const body = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.2, 0.25, 1, 6),
+            new THREE.MeshLambertMaterial({ color: clothColors[Math.floor(Math.random() * clothColors.length)] })
+          );
+          body.position.y = 0.8;
+          g.add(body);
+
+          const head = new THREE.Mesh(
+            new THREE.SphereGeometry(0.16, 6, 6),
+            new THREE.MeshLambertMaterial({ color: skinColors[Math.floor(Math.random() * skinColors.length)] })
+          );
+          head.position.y = 1.5;
+          g.add(head);
+
+          g.position.set(
+            cx + (Math.random() - 0.5) * 5,
+            0,
+            cz + (Math.random() - 0.5) * 5
+          );
+          g.userData.homeX = g.position.x;
+          g.userData.homeZ = g.position.z;
+          g.userData.scattered = false;
+          g.userData.wanderTimer = Math.random() * 5;
+          g.userData.wanderDirX = 0;
+          g.userData.wanderDirZ = 0;
+          this.scene.add(g);
+          meshes.push(g);
+        }
+
+        this.pedestrianCrowds.push({
+          position: new THREE.Vector3(cx, 0, cz),
+          meshes,
+          scatterTimer: 0,
+        });
+      }
+    }
+  }
+
+  updatePedestrianCrowds(delta) {
+    const vPos = this.vehicle.position;
+    const vSpeed = Math.abs(this.vehicle.speed);
+
+    for (const crowd of this.pedestrianCrowds) {
+      const dx = vPos.x - crowd.position.x;
+      const dz = vPos.z - crowd.position.z;
+      const dist = dx * dx + dz * dz;
+
+      // Scatter when vehicle is close and fast
+      if (dist < 100 && vSpeed > 8 && crowd.scatterTimer <= 0) {
+        crowd.scatterTimer = 3;
+        for (const ped of crowd.meshes) {
+          const pdx = ped.position.x - vPos.x;
+          const pdz = ped.position.z - vPos.z;
+          const pd = Math.sqrt(pdx * pdx + pdz * pdz) || 1;
+          ped.userData.scattered = true;
+          ped.userData.scatterVX = (pdx / pd) * (4 + Math.random() * 3);
+          ped.userData.scatterVZ = (pdz / pd) * (4 + Math.random() * 3);
+        }
+      }
+
+      if (crowd.scatterTimer > 0) {
+        crowd.scatterTimer -= delta;
+        for (const ped of crowd.meshes) {
+          if (ped.userData.scattered) {
+            ped.position.x += ped.userData.scatterVX * delta;
+            ped.position.z += ped.userData.scatterVZ * delta;
+            ped.userData.scatterVX *= 0.95;
+            ped.userData.scatterVZ *= 0.95;
+          }
+        }
+        if (crowd.scatterTimer <= 0) {
+          // Return to home positions
+          for (const ped of crowd.meshes) {
+            ped.userData.scattered = false;
+          }
+        }
+      } else {
+        // Idle wandering
+        for (const ped of crowd.meshes) {
+          ped.userData.wanderTimer -= delta;
+          if (ped.userData.wanderTimer <= 0) {
+            ped.userData.wanderTimer = 2 + Math.random() * 4;
+            ped.userData.wanderDirX = (Math.random() - 0.5) * 0.8;
+            ped.userData.wanderDirZ = (Math.random() - 0.5) * 0.8;
+          }
+          // Drift toward home
+          const hx = ped.userData.homeX - ped.position.x;
+          const hz = ped.userData.homeZ - ped.position.z;
+          ped.position.x += (ped.userData.wanderDirX + hx * 0.05) * delta;
+          ped.position.z += (ped.userData.wanderDirZ + hz * 0.05) * delta;
+          // Bob animation
+          ped.children[0].position.y = 0.8 + Math.sin(performance.now() * 0.003 + ped.userData.homeX) * 0.04;
+        }
+      }
+
+      // Collision with player — slow down if hitting pedestrians
+      if (dist < 25 && vSpeed > 5) {
+        for (const ped of crowd.meshes) {
+          const pdx = vPos.x - ped.position.x;
+          const pdz = vPos.z - ped.position.z;
+          const pd = Math.sqrt(pdx * pdx + pdz * pdz);
+          if (pd < 1.5) {
+            this.vehicle.speed *= 0.7;
+            this.shakeIntensity = 0.1;
+          }
+        }
+      }
+    }
+  }
+
+  // --- Festival Mode (Tihar/Dashain) ---
+  activateFestivalMode() {
+    this.festivalMode = true;
+    this.showDialogue('festival');
+    this.showPassengerInfo('FESTIVAL MODE! Fares doubled!');
+    setTimeout(() => this.hidePassengerInfo(), 3000);
+
+    // Spawn decorative lights along roads
+    const festiveColors = [0xff4444, 0xffcc00, 0xff8800, 0x44ff44, 0xff44ff, 0x4488ff];
+    const roads = this.city.getRoadPositions();
+
+    for (let i = 0; i < Math.min(roads.length, 80); i++) {
+      if (Math.random() > 0.3) continue;
+      const rp = roads[i];
+
+      // String of small colored lights
+      const g = new THREE.Group();
+      for (let j = 0; j < 5; j++) {
+        const bulb = new THREE.Mesh(
+          new THREE.SphereGeometry(0.12, 4, 4),
+          new THREE.MeshBasicMaterial({
+            color: festiveColors[Math.floor(Math.random() * festiveColors.length)],
+          })
+        );
+        bulb.position.set((j - 2) * 1.2, 4 + Math.sin(j) * 0.3, 0);
+        g.add(bulb);
+      }
+
+      // Wire between bulbs
+      const wire = new THREE.Mesh(
+        new THREE.BoxGeometry(6, 0.03, 0.03),
+        new THREE.MeshBasicMaterial({ color: 0x333333 })
+      );
+      wire.position.y = 4.2;
+      g.add(wire);
+
+      g.position.set(rp.x, 0, rp.z);
+      g.rotation.y = Math.random() * Math.PI;
+      this.scene.add(g);
+      this.festivalLights.push(g);
+    }
+
+    // Add rangoli patterns on ground near temples
+    const tc = Math.floor(GRID_SIZE / 2);
+    const tcx = (tc - 0.5) * CELL_SIZE + CELL_SIZE / 2;
+    const tcz = (tc - 0.5) * CELL_SIZE + CELL_SIZE / 2;
+
+    for (let i = 0; i < 4; i++) {
+      const angle = (i / 4) * Math.PI * 2;
+      const rx = tcx + Math.cos(angle) * CELL_SIZE * 1.5;
+      const rz = tcz + Math.sin(angle) * CELL_SIZE * 1.5;
+
+      const rangoli = new THREE.Mesh(
+        new THREE.RingGeometry(1.5, 3, 8),
+        new THREE.MeshBasicMaterial({
+          color: festiveColors[i % festiveColors.length],
+          transparent: true,
+          opacity: 0.2,
+          side: THREE.DoubleSide,
+        })
+      );
+      rangoli.rotation.x = -Math.PI / 2;
+      rangoli.position.set(rx, 0.05, rz);
+      this.scene.add(rangoli);
+      this.festivalLights.push(rangoli);
+    }
+  }
+
+  // --- Vehicle Upgrades ---
+  applyUpgrades() {
+    const u = this.upgrades;
+    // Apply speed upgrade (each level adds 5% max speed)
+    this.vehicle.maxSpeedMod = 1 + u.speed * 0.05;
+    // Apply brake upgrade
+    this.vehicle.brakeMod = 1 + u.brakes * 0.08;
+    // Earnings multiplier stored for fare calculation
+    this.earningsMultiplier = 1 + u.earnings * 0.1;
+    // Boost duration mod
+    this.vehicle.boostDurationMod = 1 + u.boost * 0.1;
+  }
+
+  showUpgradeMenu() {
+    const u = this.upgrades;
+    const canAfford = (cost) => this.highScore >= cost; // Use high score as currency
+    const costs = { speed: (u.speed + 1) * 200, brakes: (u.brakes + 1) * 150, earnings: (u.earnings + 1) * 250, boost: (u.boost + 1) * 180 };
+    const maxLevel = 5;
+
+    let html = '<h1 style="font-size:36px;margin-bottom:8px">UPGRADES</h1>';
+    html += '<div style="font-size:13px;opacity:.4;margin-bottom:20px">Spend your high score earnings</div>';
+    html += `<div style="font-size:16px;color:#4ade80;margin-bottom:16px">Balance: Rs. ${this.highScore}</div>`;
+    html += '<div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center;max-width:500px;margin:0 auto">';
+
+    const items = [
+      { key: 'speed', label: 'Speed', icon: '⚡', desc: '+5% max speed' },
+      { key: 'brakes', label: 'Brakes', icon: '🛑', desc: '+8% brake force' },
+      { key: 'earnings', label: 'Earnings', icon: '💰', desc: '+10% fare bonus' },
+      { key: 'boost', label: 'Boost', icon: '🚀', desc: '+10% boost duration' },
+    ];
+
+    for (const item of items) {
+      const level = u[item.key];
+      const cost = costs[item.key];
+      const maxed = level >= maxLevel;
+      const affordable = canAfford(cost) && !maxed;
+      const bars = '█'.repeat(level) + '░'.repeat(maxLevel - level);
+      html += `<div class="upgrade-card" data-key="${item.key}" style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,${affordable ? '.25' : '.08'});border-radius:10px;padding:14px 18px;min-width:110px;cursor:${affordable ? 'pointer' : 'default'};pointer-events:auto;transition:all .2s;text-align:center">
+        <div style="font-size:24px">${item.icon}</div>
+        <div style="font-size:14px;font-weight:600;margin:4px 0">${item.label}</div>
+        <div style="font-size:11px;opacity:.4;letter-spacing:1px">${bars}</div>
+        <div style="font-size:10px;opacity:.35;margin-top:4px">${item.desc}</div>
+        <div style="font-size:12px;color:${maxed ? '#a78bfa' : (affordable ? '#4ade80' : '#ff6b6b')};margin-top:6px">${maxed ? 'MAXED' : `Rs. ${cost}`}</div>
+      </div>`;
+    }
+
+    html += '</div>';
+    html += '<div style="margin-top:24px;display:flex;gap:12px;justify-content:center">';
+    html += '<div id="btn-play-upgraded" class="menu-btn" style="border-color:#4ade80;background:rgba(74,222,128,.1);pointer-events:auto">PLAY</div>';
+    html += '</div>';
+
+    this.ui.overlay.innerHTML = html;
+    this.ui.overlay.classList.remove('hidden');
+
+    // Attach click handlers
+    for (const card of this.ui.overlay.querySelectorAll('.upgrade-card')) {
+      card.addEventListener('click', () => {
+        const key = card.dataset.key;
+        const cost = costs[key];
+        if (u[key] < maxLevel && this.highScore >= cost) {
+          this.highScore -= cost;
+          u[key]++;
+          localStorage.setItem('rickshaw-rush-upgrades', JSON.stringify(u));
+          localStorage.setItem('rickshaw-rush-hs', this.highScore.toString());
+          this.showUpgradeMenu(); // refresh
+        }
+      });
+    }
+
+    document.getElementById('btn-play-upgraded')?.addEventListener('click', () => {
+      this.setMode('single');
+      this.handleStart();
+    });
+  }
+
   // --- Game Over ---
   gameOver() {
     this.state = 'gameover';
@@ -2120,12 +2623,23 @@ export class Game {
     this.police.reset();
     this.projectiles.reset();
     this.effects.cleanup();
+    this.trafficLights.endPowerCut();
     for (const ev of this.activeEvents) {
       for (const m of ev.meshes) this.scene.remove(m);
     }
     this.activeEvents = [];
     for (const p of this.exhaustParticles) this.scene.remove(p.mesh);
     this.exhaustParticles = [];
+    for (const cz of this.constructionZones) {
+      for (const m of cz.meshes) this.scene.remove(m);
+    }
+    this.constructionZones = [];
+    for (const pc of this.pedestrianCrowds) {
+      for (const m of pc.meshes) this.scene.remove(m);
+    }
+    this.pedestrianCrowds = [];
+    for (const fl of this.festivalLights) this.scene.remove(fl);
+    this.festivalLights = [];
 
     // Clean remote players
     for (const rp of Object.values(this.remotePlayers)) rp.destroy();
@@ -2199,8 +2713,22 @@ export class Game {
         ${top5Html}
         ${achHtml}
         <br>
-        <div class="overlay-prompt">Press ENTER or tap SOLO to play again</div>
+        <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:16px">
+          <div id="btn-play-again" class="menu-btn" style="border-color:#4ade80;background:rgba(74,222,128,.1);pointer-events:auto">PLAY AGAIN</div>
+          <div id="btn-upgrades" class="menu-btn" style="border-color:#a78bfa;background:rgba(167,139,250,.1);pointer-events:auto">UPGRADES</div>
+        </div>
       `;
+
+      // Attach game over button handlers
+      setTimeout(() => {
+        document.getElementById('btn-play-again')?.addEventListener('click', () => {
+          this.setMode('single');
+          this.handleStart();
+        });
+        document.getElementById('btn-upgrades')?.addEventListener('click', () => {
+          this.showUpgradeMenu();
+        });
+      }, 100);
     }
 
     this.ui.overlay.classList.remove('hidden');

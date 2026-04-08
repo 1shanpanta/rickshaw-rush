@@ -21,6 +21,11 @@ export class Vehicle {
     // Grip (reduced in rain)
     this.gripMultiplier = 1;
 
+    // Upgrade mods (set by Game.applyUpgrades)
+    this.maxSpeedMod = 1;
+    this.brakeMod = 1;
+    this.boostDurationMod = 1;
+
     // Visual
     this.tiltAngle = 0;
     this.wheelMeshes = [];
@@ -174,8 +179,9 @@ export class Vehicle {
       }
     } else {
       this.boosting = false;
-      if (this.boostCooldownTimer <= 0 && this.boostFuel < VEHICLE.boostDuration) {
-        this.boostFuel = Math.min(VEHICLE.boostDuration, this.boostFuel + delta * 0.4);
+      const boostMax = VEHICLE.boostDuration * this.boostDurationMod;
+      if (this.boostCooldownTimer <= 0 && this.boostFuel < boostMax) {
+        this.boostFuel = Math.min(boostMax, this.boostFuel + delta * 0.4);
       }
     }
 
@@ -187,14 +193,14 @@ export class Vehicle {
       this.boostFlame.rotation.z = (Math.random() - 0.5) * 0.3;
     }
 
-    const maxSpd = this.boosting ? VEHICLE.boostSpeed : VEHICLE.maxSpeed;
+    const maxSpd = (this.boosting ? VEHICLE.boostSpeed : VEHICLE.maxSpeed) * this.maxSpeedMod;
 
     // Acceleration
     if (input.forward) {
       this.speed += VEHICLE.acceleration * delta;
     } else if (input.backward) {
       if (this.speed > 0) {
-        this.speed -= VEHICLE.brakeForce * delta;
+        this.speed -= VEHICLE.brakeForce * this.brakeMod * delta;
       } else {
         this.speed -= VEHICLE.acceleration * 0.5 * delta;
       }
