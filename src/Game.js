@@ -9,6 +9,7 @@ import { Projectiles } from './Projectiles.js';
 import { Navigation } from './Navigation.js';
 import { MusicSystem } from './Music.js';
 import { RemotePlayer } from './RemotePlayer.js';
+import { RivalAI } from './RivalAI.js';
 import { Effects } from './Effects.js';
 import { Police } from './Police.js';
 import { GAME, CELL_SIZE, GRID_SIZE, TRAFFIC_LIGHT, LEVELS, FARE } from './constants.js';
@@ -178,6 +179,7 @@ export class Game {
     this.wildlife = new Wildlife(scene, this.city);
     this.projectiles = new Projectiles(scene);
     this.navigation = new Navigation(scene, this.city);
+    this.rivalAI = new RivalAI(scene, this.city);
     this.music = new MusicSystem();
     this.effects = new Effects(scene);
     this.police = new Police(scene, this.city, null); // music ref set after init
@@ -399,6 +401,8 @@ export class Game {
     this.passengers.reset();
     this.traffic.reset();
     this.wildlife.reset();
+    this.rivalAI.reset();
+    this.rivalAI.spawn(1);
 
     // Clean time bonuses
     for (const tb of this.timeBonuses) this.scene.remove(tb.mesh);
@@ -599,6 +603,15 @@ export class Game {
     this.passengers.setSurge(this.isRaining);
     const result = this.passengers.update(delta, this.vehicle.position, this.gameTime);
     if (result) this.handlePassengerEvent(result);
+
+    // Rival AI
+    const rivalResult = this.rivalAI.update(delta, this.passengers, this.city.getBuildingBounds());
+    if (rivalResult && rivalResult.type === 'rival-stole') {
+      this.showPassengerInfo('Rival stole your passenger! Find another one!');
+      this.music.playViolation();
+      this.passengers.spawnPassenger();
+      setTimeout(() => this.hidePassengerInfo(), 2500);
+    }
 
     // Weather
     this.updateWeather(delta);
@@ -983,6 +996,7 @@ export class Game {
   levelUp() {
     this.level++;
     this.traffic.addMore(LEVELS.extraTraffic);
+    if (this.level % 2 === 0) this.rivalAI.spawn(1); // extra rival every 2 levels
 
     const el = this.ui.levelUp;
     el.textContent = `LEVEL ${this.level}!`;
