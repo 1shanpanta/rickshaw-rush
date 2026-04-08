@@ -2,7 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="description" content="Race a rickshaw through the chaotic streets of Kathmandu! Pick up passengers, dodge traffic, escape police, and earn fares in this 3D arcade driving game.">
+  <meta property="og:title" content="Rickshaw Rush">
+  <meta property="og:description" content="Race a rickshaw through the chaotic streets of Kathmandu! 3D arcade driving game.">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Rickshaw Rush">
+  <meta name="twitter:description" content="Race a rickshaw through Kathmandu! 3D arcade driving game. #vibejam">
   <title>Rickshaw Rush</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛺</text></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -159,6 +166,22 @@
     #touch-balloon{right:40px;bottom:30px;border-color:rgba(51,153,255,0.3)}
     #touch-brake{right:110px;bottom:140px;border-color:rgba(255,107,107,0.3)}
 
+    /* --- Upgrade cards --- */
+    .upgrade-card:hover{transform:scale(1.05);filter:brightness(1.2)}
+
+    /* --- Police chase warning --- */
+    #police-warning{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);font-size:20px;font-weight:700;color:#ff4444;pointer-events:none;z-index:15;opacity:0;text-shadow:0 0 20px rgba(255,0,0,.5);letter-spacing:2px;text-transform:uppercase}
+    #police-warning.active{opacity:1;animation:policeFlash 0.5s ease-in-out infinite}
+    @keyframes policeFlash{0%,100%{opacity:1;color:#ff4444}50%{opacity:.7;color:#4444ff}}
+
+    /* --- Festival banner --- */
+    #festival-banner{position:fixed;top:90px;left:50%;transform:translateX(-50%);pointer-events:none;z-index:10;font-size:13px;font-weight:700;color:#ffd700;opacity:0;transition:opacity .5s;text-shadow:0 0 10px rgba(255,215,0,.4);letter-spacing:1px}
+    #festival-banner.active{opacity:1}
+
+    /* --- Power cut overlay --- */
+    #powercut-overlay{position:fixed;inset:0;pointer-events:none;z-index:4;opacity:0;transition:opacity .5s;background:radial-gradient(ellipse at center,transparent 30%,rgba(0,0,0,.2) 100%)}
+    #powercut-overlay.active{opacity:1}
+
     /* --- Animated title background --- */
     #title-scene-hint{position:absolute;bottom:20px;left:50%;transform:translateX(-50%);font-size:11px;opacity:0.2;letter-spacing:1px}
   </style>
@@ -216,6 +239,9 @@
   <div id="crosshair"></div>
   <div id="screen-flash"></div>
   <div id="slowmo-vignette"></div>
+  <div id="police-warning">POLICE! ESCAPE!</div>
+  <div id="festival-banner">FESTIVAL MODE - FARES x2</div>
+  <div id="powercut-overlay"></div>
 
   <!-- Ammo display -->
   <div id="ammo-wrap">

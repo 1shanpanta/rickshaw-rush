@@ -307,6 +307,9 @@ export class Game {
       crosshair: document.getElementById('crosshair'),
       slowmoVignette: document.getElementById('slowmo-vignette'),
       photoModeEl: document.getElementById('photo-mode'),
+      policeWarning: document.getElementById('police-warning'),
+      festivalBanner: document.getElementById('festival-banner'),
+      powercutOverlay: document.getElementById('powercut-overlay'),
     };
 
     this.minimapCanvas = document.getElementById('minimap-canvas');
@@ -833,6 +836,16 @@ export class Game {
 
     // UI
     this.updateUI();
+
+    // Police warning overlay
+    this.ui.policeWarning?.classList.toggle('active', this.police.isActive());
+
+    // Festival banner
+    this.ui.festivalBanner?.classList.toggle('active', this.festivalMode);
+
+    // Power cut overlay
+    this.ui.powercutOverlay?.classList.toggle('active', this.trafficLights.isPowerCut());
+
     if (this.mode === 'single') {
       this.updateMinimap();
       if (this.fullmapOpen) this.drawFullmap();
@@ -2683,6 +2696,10 @@ export class Game {
       if (this.totalStars >= 9) achievements.push('Star Collector');
       if (this.violations === 0 && this.deliveries > 0) achievements.push('Law Abiding');
       if (this.level >= 4) achievements.push('Level Boss');
+      if (this.level >= 5) achievements.push('Festival Rider');
+      if (this.score >= 1000) achievements.push('Rs. 1000 Club');
+      if (this.fines === 0 && this.violations === 0) achievements.push('Clean Record');
+      if (this.deliveries >= 15) achievements.push('Kathmandu Legend');
 
       const achHtml = achievements.length > 0
         ? `<div class="overlay-achievements">${achievements.map(a =>
@@ -2716,6 +2733,7 @@ export class Game {
         <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:16px">
           <div id="btn-play-again" class="menu-btn" style="border-color:#4ade80;background:rgba(74,222,128,.1);pointer-events:auto">PLAY AGAIN</div>
           <div id="btn-upgrades" class="menu-btn" style="border-color:#a78bfa;background:rgba(167,139,250,.1);pointer-events:auto">UPGRADES</div>
+          <div id="btn-share" class="menu-btn" style="border-color:#22d3ee;background:rgba(34,211,238,.1);pointer-events:auto">SHARE</div>
         </div>
       `;
 
@@ -2727,6 +2745,11 @@ export class Game {
         });
         document.getElementById('btn-upgrades')?.addEventListener('click', () => {
           this.showUpgradeMenu();
+        });
+        document.getElementById('btn-share')?.addEventListener('click', () => {
+          const text = `I scored Rs. ${this.score} in Rickshaw Rush! ${this.deliveries} deliveries, Level ${this.level} 🛺\n\nCan you beat me? #RickshawRush #vibejam`;
+          const url = window.location.href;
+          window.open(`https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`, '_blank');
         });
       }, 100);
     }
