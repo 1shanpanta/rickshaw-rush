@@ -127,7 +127,7 @@ export class Navigation {
 
       const worldX = cx * CELL_SIZE + CELL_SIZE / 2;
       const worldZ = cz * CELL_SIZE + CELL_SIZE / 2;
-      const angle = Math.atan2(bestDx, bestDz);
+      const angle = Math.atan2(-bestDx, -bestDz);
 
       waypoints.push({ x: worldX, z: worldZ, angle });
     }

@@ -30,6 +30,7 @@ export class Vehicle {
     this.tiltAngle = 0;
     this.wheelMeshes = [];
     this.boostFlame = null;
+    this.headlightsOn = true;
 
     this.createMesh();
   }
@@ -85,12 +86,63 @@ export class Vehicle {
     stripe.position.y = 0.6;
     this.mesh.add(stripe);
 
-    // Headlights
+    // Headlights (visual + actual SpotLights)
     const hMat = new THREE.MeshBasicMaterial({ color: 0xffffaa });
+    this.headlightTargets = [];
+    this.headlights = [];
     for (const side of [-0.65, 0.65]) {
       const hl = new THREE.Mesh(new THREE.SphereGeometry(0.18, 6, 6), hMat);
       hl.position.set(side, 1.2, 2.81);
       this.mesh.add(hl);
+
+      // Light target (point ahead of the vehicle)
+      const target = new THREE.Object3D();
+      target.position.set(side, 0, 18);
+      this.mesh.add(target);
+
+      const spot = new THREE.SpotLight(0xfff8e0, 5, 60, Math.PI / 4.5, 0.4, 1.2);
+      spot.position.set(side, 1.3, 2.9);
+      spot.target = target;
+      spot.castShadow = false;
+      this.mesh.add(spot);
+      this.headlights.push(spot);
+      this.headlightTargets.push(target);
+
+      // Visible light cone mesh
+      const coneGeo = new THREE.ConeGeometry(3.5, 18, 8, 1, true);
+      const coneMat = new THREE.MeshBasicMaterial({
+        color: 0xffeeaa,
+        transparent: true,
+        opacity: 0.04,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+      const cone = new THREE.Mesh(coneGeo, coneMat);
+      cone.rotation.x = Math.PI / 2;
+      cone.position.set(side, 1.0, 12);
+      this.mesh.add(cone);
+      this.headlights.push(cone); // track for toggle
+    }
+
+    // Soft ground glow (pooled light beneath vehicle for road visibility)
+    this.groundGlow = new THREE.PointLight(0xffeedd, 2.5, 35, 1.8);
+    this.groundGlow.position.set(0, 2.5, 6);
+    this.mesh.add(this.groundGlow);
+
+    // Headlight glow spheres (visual feedback that lights are on)
+    this.headlightGlows = [];
+    const glowMat = new THREE.MeshBasicMaterial({
+      color: 0xffffcc,
+      transparent: true,
+      opacity: 0.6,
+      blending: THREE.AdditiveBlending,
+    });
+    for (const side of [-0.65, 0.65]) {
+      const glow = new THREE.Mesh(new THREE.SphereGeometry(0.3, 6, 6), glowMat);
+      glow.position.set(side, 1.2, 2.85);
+      this.mesh.add(glow);
+      this.headlightGlows.push(glow);
     }
 
     // Tail lights
@@ -146,6 +198,13 @@ export class Vehicle {
     this.mesh.add(this.boostFlame);
 
     this.scene.add(this.mesh);
+  }
+
+  toggleHeadlights() {
+    this.headlightsOn = !this.headlightsOn;
+    for (const obj of this.headlights) obj.visible = this.headlightsOn;
+    this.groundGlow.visible = this.headlightsOn;
+    for (const g of this.headlightGlows) g.visible = this.headlightsOn;
   }
 
   setPosition(x, y, z) {

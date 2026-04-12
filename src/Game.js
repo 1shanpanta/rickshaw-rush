@@ -12,7 +12,17 @@ import { RemotePlayer } from './RemotePlayer.js';
 import { RivalAI } from './RivalAI.js';
 import { Effects } from './Effects.js';
 import { Police } from './Police.js';
-import { GAME, CELL_SIZE, GRID_SIZE, TRAFFIC_LIGHT, LEVELS, FARE } from './constants.js';
+import { GAME, CELL_SIZE, GRID_SIZE, TRAFFIC_LIGHT, LEVELS, FARE, MAPS } from './constants.js';
+import { removeAndDispose } from './utils.js';
+
+// --- State machine ---
+export const STATE = { MENU: 'menu', PLAYING: 'playing', PAUSED: 'paused', GAMEOVER: 'gameover' };
+const VALID_TRANSITIONS = {
+  [STATE.MENU]: [STATE.PLAYING],
+  [STATE.PLAYING]: [STATE.PAUSED, STATE.GAMEOVER],
+  [STATE.PAUSED]: [STATE.PLAYING, STATE.GAMEOVER],
+  [STATE.GAMEOVER]: [STATE.MENU, STATE.PLAYING],
+};
 
 export class Game {
   constructor(scene, camera, sunLight, network, postProcessing = {}) {
@@ -22,7 +32,7 @@ export class Game {
     this.network = network;
     this.bloomPass = postProcessing.bloomPass || null;
     this.caPass = postProcessing.caPass || null;
-    this.state = 'menu';
+    this.state = STATE.MENU;
     this.mode = 'single'; // 'single' | 'online'
 
     // Slow-motion system
@@ -202,8 +212,11 @@ export class Game {
       ],
     };
 
+    // Map selection (set before start via setMap)
+    this.selectedMap = 'kathmandu';
+
     // Systems
-    this.city = new City(scene);
+    this.city = new City(scene, this.selectedMap);
     this.trafficLights = new TrafficLights(scene, this.city);
     this.vehicle = new Vehicle(scene);
     this.traffic = new Traffic(scene, this.city, this.trafficLights);
@@ -368,6 +381,21 @@ export class Game {
     this.scene.add(this.rainParticles);
   }
 
+  // --- State machine ---
+  setState(newState) {
+    const allowed = VALID_TRANSITIONS[this.state];
+    if (!allowed || !allowed.includes(newState)) {
+      console.warn(`Invalid state transition: ${this.state} -> ${newState}`);
+      return;
+    }
+    this.state = newState;
+  }
+
+  // --- Map selection ---
+  setMap(mapId) {
+    this.selectedMap = mapId;
+  }
+
   // --- Mode selection ---
   setMode(mode) {
     this.mode = mode;
@@ -410,9 +438,16 @@ export class Game {
 
   // --- Start / Reset ---
   handleStart() {
-    if (this.state !== 'menu' && this.state !== 'gameover') return;
+    if (this.state !== STATE.MENU && this.state !== STATE.GAMEOVER) return;
 
-    this.state = 'playing';
+    this.setState(STATE.PLAYING);
+
+    // Apply map config to scene
+    const mapCfg = MAPS[this.selectedMap] || MAPS.kathmandu;
+    this.scene.background.set(mapCfg.skyColor);
+    if (this.scene.fog) this.scene.fog.color.set(mapCfg.fogColor);
+    if (this.scene.fog) this.scene.fog.density = mapCfg.fogDensity;
+
     this.score = 0;
     this.timeLeft = GAME.totalTime;
     this.gameTime = 0;
@@ -440,7 +475,7 @@ export class Game {
     this.rivalAI.spawn(1);
 
     // Clean time bonuses
-    for (const tb of this.timeBonuses) this.scene.remove(tb.mesh);
+    for (const tb of this.timeBonuses) removeAndDispose(this.scene, tb.mesh);
     this.timeBonuses = [];
     this.timeBonusSpawnTimer = 12;
     this.trail = [];
@@ -466,21 +501,21 @@ export class Game {
 
     // Construction zones
     for (const cz of this.constructionZones) {
-      for (const m of cz.meshes) this.scene.remove(m);
+      for (const m of cz.meshes) removeAndDispose(this.scene, m);
     }
     this.constructionZones = [];
     this.constructionSpawnTimer = 30;
 
     // Pedestrian crowds
     for (const pc of this.pedestrianCrowds) {
-      for (const m of pc.meshes) this.scene.remove(m);
+      for (const m of pc.meshes) removeAndDispose(this.scene, m);
     }
     this.pedestrianCrowds = [];
     this.spawnPedestrianCrowds();
 
     // Festival mode
     this.festivalMode = false;
-    for (const fl of this.festivalLights) this.scene.remove(fl);
+    for (const fl of this.festivalLights) removeAndDispose(this.scene, fl);
     this.festivalLights = [];
 
     // Apply vehicle upgrades
@@ -512,6 +547,7 @@ export class Game {
 
     // Police
     this.police.reset();
+    this.policeCaught = false;
     this.frozen = false;
     this.freezeTimer = 0;
 
@@ -564,7 +600,7 @@ export class Game {
 
   // --- Main Update ---
   update(delta, keys) {
-    if (this.state !== 'playing') return;
+    if (this.state !== STATE.PLAYING) return;
     if (this.photoMode) {
       this.photoOrbitAngle += delta * 0.5;
       const vPos = this.vehicle.position;
@@ -607,7 +643,7 @@ export class Game {
       this.updateUI();
       if (this.mode === 'single') this.updateMinimap();
       // Keep police visible during freeze
-      this.police.update(delta, this.vehicle.position, this.city.getBuildingBounds());
+      this.police.update(delta, this.vehicle.position, this.city.getNearbyBuildings(this.police.position.x, this.police.position.z));
       return;
     }
 
@@ -750,18 +786,37 @@ export class Game {
     this.updatePedestrianCrowds(delta);
 
     // Police chase
-    const policeResult = this.police.update(delta, this.vehicle.position, this.city.getBuildingBounds());
+    const policeResult = this.police.update(delta, this.vehicle.position, this.city.getNearbyBuildings(this.police.position.x, this.police.position.z));
+
+    // Distance-based warnings
+    if (this.police.isActive()) {
+      const pdx = this.vehicle.position.x - this.police.position.x;
+      const pdz = this.vehicle.position.z - this.police.position.z;
+      const distSq = pdx * pdx + pdz * pdz;
+      const tier = distSq < 100 ? 0 : distSq < 400 ? 1 : distSq < 1225 ? 2 : 3;
+      if (tier !== this._lastPoliceTier) {
+        this._lastPoliceTier = tier;
+        const warning = this.ui.policeWarning;
+        if (warning) {
+          const msgs = ['POLICE! ALMOST CAUGHT!', 'POLICE CLOSING IN!', 'POLICE APPROACHING!', 'POLICE! ESCAPE!'];
+          const sizes = ['26px', '22px', '18px', '20px'];
+          warning.textContent = msgs[tier];
+          warning.style.fontSize = sizes[tier];
+        }
+      }
+      if (distSq < 225) this.shakeIntensity = Math.max(this.shakeIntensity, 0.15);
+    }
+
     if (policeResult) {
       if (policeResult.type === 'caught') {
-        const fine = 500;
-        this.score = Math.max(0, this.score - fine);
-        this.fines += fine;
-        this.frozen = true;
-        this.freezeTimer = 5;
-        this.shakeIntensity = 0.6;
-        this.showDialogue('policeCaught');
-        this.showPoliceFine(fine);
+        this.shakeIntensity = 0.8;
         this.music.playViolation();
+        this.showDialogue('policeCaught');
+        this.policeCaught = true;
+        this.score = Math.max(0, this.score - 500);
+        this.fines += 500;
+        this.gameOver();
+        return;
       } else if (policeResult.type === 'escaped') {
         const bonus = 50;
         this.score += bonus;
@@ -896,7 +951,7 @@ export class Game {
   checkBuildingCollisions() {
     const pos = this.vehicle.position;
     const r = 1.8;
-    for (const b of this.city.getBuildingBounds()) {
+    for (const b of this.city.getNearbyBuildings(pos.x, pos.z)) {
       const cx = Math.max(b.minX, Math.min(pos.x, b.maxX));
       const cz = Math.max(b.minZ, Math.min(pos.z, b.maxZ));
       const dx = pos.x - cx;
@@ -925,7 +980,7 @@ export class Game {
     const vSpeed = Math.abs(this.vehicle.speed);
     const vR = 2;
 
-    for (const npc of this.traffic.vehicles) {
+    for (const npc of this.traffic.getNearby(vPos.x, vPos.z)) {
       const dx = vPos.x - npc.position.x;
       const dz = vPos.z - npc.position.z;
       const dist = Math.sqrt(dx * dx + dz * dz);
@@ -966,7 +1021,7 @@ export class Game {
           this.effects.spawnNearMissFlash();
         }
       }
-      if (npc._nmCd > 0) npc._nmCd -= 0.016;
+      if (npc._nmCd > 0) npc._nmCd -= delta;
     }
   }
 
@@ -1349,7 +1404,7 @@ export class Game {
       p.mesh.material.opacity -= delta * 0.5;
 
       if (p.life <= 0) {
-        this.scene.remove(p.mesh);
+        removeAndDispose(this.scene, p.mesh);
         this.exhaustParticles.splice(i, 1);
       }
     }
@@ -1421,14 +1476,14 @@ export class Game {
         this.showPassengerInfo(`+${tb.seconds}s TIME BONUS!`);
         this.music.playPickup();
         setTimeout(() => this.hidePassengerInfo(), 1500);
-        this.scene.remove(tb.mesh);
+        removeAndDispose(this.scene, tb.mesh);
         this.timeBonuses.splice(i, 1);
         continue;
       }
 
       // Expire
       if (tb.life <= 0) {
-        this.scene.remove(tb.mesh);
+        removeAndDispose(this.scene, tb.mesh);
         this.timeBonuses.splice(i, 1);
       }
     }
@@ -2073,7 +2128,7 @@ export class Game {
       if (ev._hitCooldown > 0) ev._hitCooldown -= delta;
 
       if (ev.life <= 0) {
-        for (const m of ev.meshes) this.scene.remove(m);
+        for (const m of ev.meshes) removeAndDispose(this.scene, m);
         this.activeEvents.splice(i, 1);
       }
     }
@@ -2219,7 +2274,7 @@ export class Game {
       }
 
       if (cz.life <= 0) {
-        for (const m of cz.meshes) this.scene.remove(m);
+        for (const m of cz.meshes) removeAndDispose(this.scene, m);
         this.constructionZones.splice(i, 1);
       }
     }
@@ -2601,7 +2656,7 @@ export class Game {
 
   // --- Game Over ---
   gameOver() {
-    this.state = 'gameover';
+    this.setState(STATE.GAMEOVER);
     this.music.stop();
 
     // High score (solo only)
@@ -2639,20 +2694,20 @@ export class Game {
     this.effects.cleanup();
     this.trafficLights.endPowerCut();
     for (const ev of this.activeEvents) {
-      for (const m of ev.meshes) this.scene.remove(m);
+      for (const m of ev.meshes) removeAndDispose(this.scene, m);
     }
     this.activeEvents = [];
-    for (const p of this.exhaustParticles) this.scene.remove(p.mesh);
+    for (const p of this.exhaustParticles) removeAndDispose(this.scene, p.mesh);
     this.exhaustParticles = [];
     for (const cz of this.constructionZones) {
-      for (const m of cz.meshes) this.scene.remove(m);
+      for (const m of cz.meshes) removeAndDispose(this.scene, m);
     }
     this.constructionZones = [];
     for (const pc of this.pedestrianCrowds) {
-      for (const m of pc.meshes) this.scene.remove(m);
+      for (const m of pc.meshes) removeAndDispose(this.scene, m);
     }
     this.pedestrianCrowds = [];
-    for (const fl of this.festivalLights) this.scene.remove(fl);
+    for (const fl of this.festivalLights) removeAndDispose(this.scene, fl);
     this.festivalLights = [];
 
     // Clean remote players
@@ -2718,7 +2773,8 @@ export class Game {
         : '';
 
       this.ui.overlay.innerHTML = `
-        <h1>${isNewHigh ? 'NEW HIGH SCORE!' : "TIME'S UP!"}</h1>
+        <h1>${this.policeCaught ? 'BUSTED!' : isNewHigh ? 'NEW HIGH SCORE!' : "TIME'S UP!"}</h1>
+        ${this.policeCaught ? '<div style="font-size:16px;color:#ff6b6b;margin-bottom:8px">Caught by police — Rs. 500 fine deducted</div>' : ''}
         <div class="overlay-final-score">Rs. ${this.score}</div>
         <div class="overlay-stats">
           Level reached: ${this.level}<br>

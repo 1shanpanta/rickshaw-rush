@@ -23,6 +23,15 @@ export class MusicSystem {
     this.intensity = 0.5;
     this.schedulerInterval = null;
     this.comboMultiplier = 1;
+    this.muted = false;
+  }
+
+  // Auto-disconnect oscillator and gain when done playing
+  _autoClean(osc, ...gains) {
+    osc.onended = () => {
+      osc.disconnect();
+      for (const g of gains) g.disconnect();
+    };
   }
 
   init() {
@@ -46,11 +55,22 @@ export class MusicSystem {
     delay.connect(this.masterGain);
     this.reverbGain.connect(this.masterGain);
 
-    // Preload audio samples
+    // Preload audio samples (CC0 from OpenGameArt + originals)
     this.samples = {};
     this.loadSample('horn', '/sounds/horn.mp3');
     this.loadSample('ambiance', '/sounds/ambiance.mp3');
     this.loadSample('crash', '/sounds/crash.mp3');
+    this.loadSample('pickup', '/sounds/pickup.ogg');
+    this.loadSample('delivery', '/sounds/delivery.ogg');
+    this.loadSample('collision', '/sounds/collision.ogg');
+    this.loadSample('metal-crash', '/sounds/metal-crash.ogg');
+    this.loadSample('nearmiss', '/sounds/nearmiss.wav');
+    this.loadSample('bell', '/sounds/bell.ogg');
+    this.loadSample('splash', '/sounds/splash.ogg');
+    this.loadSample('boost', '/sounds/boost.ogg');
+    this.loadSample('siren', '/sounds/siren.mp3');
+    this.loadSample('gong', '/sounds/gong.ogg');
+    this.loadSample('explosion', '/sounds/explosion.ogg');
 
     this.startEngine();
     this.startMusic();
@@ -487,25 +507,57 @@ export class MusicSystem {
       this.playSample('horn', 0.7);
       return;
     }
-    // Fallback: synthesized horn
+    // Synthesized Nepali rickshaw horn — loud two-tone "pee-paw"
     const ctx = this.ctx;
     const t = ctx.currentTime;
-    for (const [freq, start, dur] of [[480, 0, 0.18], [380, 0.2, 0.22]]) {
-      const osc = ctx.createOscillator();
-      osc.type = 'square';
-      osc.frequency.setValueAtTime(freq, t + start);
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0.06, t + start);
-      g.gain.exponentialRampToValueAtTime(0.001, t + start + dur);
-      osc.connect(g);
-      g.connect(this.masterGain);
-      osc.start(t + start);
-      osc.stop(t + start + dur + 0.02);
-    }
+
+    // High tone (pee)
+    const osc1 = ctx.createOscillator();
+    osc1.type = 'sawtooth';
+    osc1.frequency.setValueAtTime(620, t);
+    osc1.frequency.linearRampToValueAtTime(580, t + 0.15);
+    const g1 = ctx.createGain();
+    g1.gain.setValueAtTime(0.14, t);
+    g1.gain.setValueAtTime(0.14, t + 0.1);
+    g1.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+    osc1.connect(g1);
+    g1.connect(this.masterGain);
+    osc1.start(t);
+    osc1.stop(t + 0.22);
+    this._autoClean(osc1, g1);
+
+    // Low tone (paw)
+    const osc2 = ctx.createOscillator();
+    osc2.type = 'sawtooth';
+    osc2.frequency.setValueAtTime(440, t + 0.18);
+    osc2.frequency.linearRampToValueAtTime(410, t + 0.38);
+    const g2 = ctx.createGain();
+    g2.gain.setValueAtTime(0.16, t + 0.18);
+    g2.gain.setValueAtTime(0.16, t + 0.3);
+    g2.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+    osc2.connect(g2);
+    g2.connect(this.masterGain);
+    osc2.start(t + 0.18);
+    osc2.stop(t + 0.47);
+    this._autoClean(osc2, g2);
+
+    // Sub harmonic for body
+    const sub = ctx.createOscillator();
+    sub.type = 'sine';
+    sub.frequency.value = 220;
+    const gs = ctx.createGain();
+    gs.gain.setValueAtTime(0.08, t);
+    gs.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+    sub.connect(gs);
+    gs.connect(this.masterGain);
+    sub.start(t);
+    sub.stop(t + 0.37);
+    this._autoClean(sub, gs);
   }
 
   playDelivery() {
     if (!this.ctx) return;
+    if (this.samples.delivery) { this.playSample('delivery', 0.7); return; }
     const ctx = this.ctx;
     const t = ctx.currentTime;
 
@@ -526,6 +578,7 @@ export class MusicSystem {
       g.gain.exponentialRampToValueAtTime(0.001, t + i * 0.07 + 0.3);
       osc.start(t + i * 0.07);
       osc.stop(t + i * 0.07 + 0.35);
+      this._autoClean(osc, g);
     });
   }
 
@@ -544,10 +597,12 @@ export class MusicSystem {
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
     osc.start(t);
     osc.stop(t + 0.3);
+    this._autoClean(osc, g);
   }
 
   playPickup() {
     if (!this.ctx) return;
+    if (this.samples.pickup) { this.playSample('pickup', 0.6); return; }
     const ctx = this.ctx;
     const t = ctx.currentTime;
     const osc = ctx.createOscillator();
@@ -561,10 +616,12 @@ export class MusicSystem {
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
     osc.start(t);
     osc.stop(t + 0.22);
+    this._autoClean(osc, g);
   }
 
   playNearMiss() {
     if (!this.ctx) return;
+    if (this.samples.nearmiss) { this.playSample('nearmiss', 0.4); return; }
     const ctx = this.ctx;
     const t = ctx.currentTime;
     const osc = ctx.createOscillator();
@@ -578,6 +635,7 @@ export class MusicSystem {
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
     osc.start(t);
     osc.stop(t + 0.15);
+    this._autoClean(osc, g);
   }
 
   // --- Ambient & Environmental ---
@@ -751,14 +809,19 @@ export class MusicSystem {
 
   playCollisionThud(intensity) {
     if (!this.ctx) return;
-    // Use sample if available
+    const vol = Math.max(0, Math.min(1, intensity));
+    // Use sample if available — pick from collision sounds
+    if (this.samples.collision) {
+      this.playSample(vol > 0.5 ? 'metal-crash' : 'collision', 0.5 * vol);
+      return;
+    }
     if (this.samples.crash) {
-      this.playSample('crash', 0.5 * Math.max(0, Math.min(1, intensity)));
+      this.playSample('crash', 0.5 * vol);
       return;
     }
     const ctx = this.ctx;
     const t = ctx.currentTime;
-    const vol = 0.06 * Math.max(0, Math.min(1, intensity));
+    const synthVol = 0.06 * vol;
 
     // Low sine thud with pitch drop
     const osc = ctx.createOscillator();
@@ -767,7 +830,7 @@ export class MusicSystem {
     osc.frequency.exponentialRampToValueAtTime(30, t + 0.15);
 
     const g = ctx.createGain();
-    g.gain.setValueAtTime(vol, t);
+    g.gain.setValueAtTime(synthVol, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
 
     osc.connect(g);
@@ -786,7 +849,7 @@ export class MusicSystem {
     const noise = ctx.createBufferSource();
     noise.buffer = buf;
     const ng = ctx.createGain();
-    ng.gain.setValueAtTime(vol * 0.5, t);
+    ng.gain.setValueAtTime(synthVol * 0.5, t);
     ng.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
 
     noise.connect(ng);
@@ -797,6 +860,7 @@ export class MusicSystem {
 
   playCelebration() {
     if (!this.ctx) return;
+    if (this.samples.gong) { this.playSample('gong', 0.4); return; }
     const ctx = this.ctx;
     const t = ctx.currentTime;
 
@@ -953,6 +1017,7 @@ export class MusicSystem {
 
   playTempleBells() {
     if (!this.ctx) return;
+    if (this.samples.bell) { this.playSample('bell', 0.3); return; }
     const ctx = this.ctx;
     const t = ctx.currentTime;
 
@@ -1019,6 +1084,13 @@ export class MusicSystem {
 
   setIntensity(val) {
     this.intensity = Math.max(0.3, Math.min(1, val));
+  }
+
+  toggleMute() {
+    if (!this.masterGain) return false;
+    this.muted = !this.muted;
+    this.masterGain.gain.setTargetAtTime(this.muted ? 0 : 0.55, this.ctx.currentTime, 0.05);
+    return this.muted;
   }
 
   stop() {

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { CELL_SIZE, GRID_SIZE } from './constants.js';
+import { removeAndDispose } from './utils.js';
 
 const ANIMAL_TYPES = {
   dog: { w: 0.6, h: 0.5, l: 0.9, color: 0x8b6914, speed: 3, count: 14 },
@@ -316,7 +317,7 @@ export class Wildlife {
   }
 
   reset() {
-    for (const a of this.animals) this.scene.remove(a.mesh);
+    for (const a of this.animals) removeAndDispose(this.scene, a.mesh);
     this.animals = [];
     this.spawnAnimals();
   }

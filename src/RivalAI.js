@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { CELL_SIZE, GRID_SIZE } from './constants.js';
+import { removeAndDispose } from './utils.js';
 
 const RIVAL_COLORS = [0xcc3333, 0xcc8800, 0x8833cc];
 
@@ -193,7 +194,7 @@ export class RivalAI {
   }
 
   reset() {
-    for (const r of this.rivals) this.scene.remove(r.mesh);
+    for (const r of this.rivals) removeAndDispose(this.scene, r.mesh);
     this.rivals = [];
   }
 }

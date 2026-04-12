@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { removeAndDispose } from './utils.js';
 
 export class Projectiles {
   constructor(scene) {
@@ -133,7 +134,7 @@ export class Projectiles {
 
       if (hit || b.life <= 0) {
         this.createSplash(b.position, traffic, wildlife);
-        this.scene.remove(b.mesh);
+        removeAndDispose(this.scene, b.mesh);
         this.balloons.splice(i, 1);
       }
     }
@@ -157,8 +158,8 @@ export class Projectiles {
       }
 
       if (sp.life <= 0) {
-        this.scene.remove(sp.ring);
-        for (const d of sp.droplets) this.scene.remove(d);
+        removeAndDispose(this.scene, sp.ring);
+        for (const d of sp.droplets) removeAndDispose(this.scene, d);
         this.splashes.splice(i, 1);
       }
     }
@@ -219,10 +220,10 @@ export class Projectiles {
   }
 
   reset() {
-    for (const b of this.balloons) this.scene.remove(b.mesh);
+    for (const b of this.balloons) removeAndDispose(this.scene, b.mesh);
     for (const sp of this.splashes) {
-      this.scene.remove(sp.ring);
-      for (const d of sp.droplets) this.scene.remove(d);
+      removeAndDispose(this.scene, sp.ring);
+      for (const d of sp.droplets) removeAndDispose(this.scene, d);
     }
     this.balloons = [];
     this.splashes = [];

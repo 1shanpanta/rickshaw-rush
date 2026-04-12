@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { CELL_SIZE, GRID_SIZE } from './constants.js';
+import { removeAndDispose } from './utils.js';
 
 const NPC_TYPES = {
   bus: { colors: [0x2255aa, 0xcc4400, 0x228844, 0x884422], width: 2.5, height: 3, length: 5.5, speed: 7, radius: 3.2 },
@@ -13,13 +14,20 @@ const NPC_TYPES = {
   bicycle: { colors: [0x333333, 0x663333, 0x336633], width: 0.5, height: 1.3, length: 1.5, speed: 7, radius: 0.7 },
 };
 
+const DIR_DX = [1, 0, -1, 0];
+const DIR_DZ = [0, 1, 0, -1];
+const DIR_ROT = [Math.PI / 2, 0, -Math.PI / 2, Math.PI];
+const LANE_OFFSET = 4;
+const INTERSECTION_THRESHOLD = 3;
+const HALF_CELL = CELL_SIZE / 2;
+
 export class Traffic {
   constructor(scene, city, trafficLights) {
     this.scene = scene;
     this.city = city;
     this.trafficLights = trafficLights;
     this.vehicles = [];
-    this.baseCounts = { bus: 18, microbus: 14, motorcycle: 45, scooter: 25, tempo: 10, cow: 14, car: 35, truck: 8, bicycle: 18 };
+    this.baseCounts = { bus: 10, microbus: 8, motorcycle: 25, scooter: 15, tempo: 6, cow: 8, car: 20, truck: 5, bicycle: 10 };
     this.spawnTraffic(this.baseCounts);
   }
 
@@ -71,7 +79,7 @@ export class Traffic {
         new THREE.MeshLambertMaterial({ color })
       );
       body.position.y = cfg.height * 0.55;
-      body.castShadow = true;
+      body.castShadow = false;
       group.add(body);
 
       const head = new THREE.Mesh(
@@ -149,7 +157,7 @@ export class Traffic {
       const bodyMat = new THREE.MeshLambertMaterial({ color });
       const body = new THREE.Mesh(new THREE.BoxGeometry(cfg.width, cfg.height * 0.8, cfg.length), bodyMat);
       body.position.y = cfg.height * 0.5;
-      body.castShadow = true;
+      body.castShadow = false;
       group.add(body);
 
       const roof = new THREE.Mesh(
@@ -179,7 +187,7 @@ export class Traffic {
       const cabMat = new THREE.MeshLambertMaterial({ color });
       const cab = new THREE.Mesh(new THREE.BoxGeometry(cfg.width, cfg.height * 0.8, cfg.length * 0.3), cabMat);
       cab.position.set(0, cfg.height * 0.5, cfg.length * 0.3);
-      cab.castShadow = true;
+      cab.castShadow = false;
       group.add(cab);
 
       // Cargo area
@@ -214,7 +222,7 @@ export class Traffic {
         new THREE.MeshLambertMaterial({ color })
       );
       body.position.y = cfg.height / 2 + 0.3;
-      body.castShadow = true;
+      body.castShadow = false;
       group.add(body);
 
       const ws = new THREE.Mesh(
@@ -250,6 +258,19 @@ export class Traffic {
     const citySize = GRID_SIZE * CELL_SIZE;
 
     for (const npc of this.vehicles) {
+      // Initialize road direction if not set
+      if (npc.roadDir == null) {
+        // Snap to nearest cardinal direction from current rotation
+        let bestDir = 0;
+        let bestDot = -Infinity;
+        for (let d = 0; d < 4; d++) {
+          const dot = npc.direction.x * DIR_DX[d] + npc.direction.z * DIR_DZ[d];
+          if (dot > bestDot) { bestDot = dot; bestDir = d; }
+        }
+        npc.roadDir = bestDir;
+        npc.lastIntersection = null;
+      }
+
       // Honk reaction
       if (playerVehicle.honking) {
         const dx = npc.position.x - playerVehicle.position.x;
@@ -273,24 +294,92 @@ export class Traffic {
         }
       }
 
-      // Turn logic
-      npc.turnTimer -= delta;
-      if (npc.turnTimer <= 0 && npc.scaredTimer <= 0) {
-        npc.turnTimer = 1.5 + Math.random() * 3;
-        const gx = Math.floor(npc.position.x / CELL_SIZE);
-        const gz = Math.floor(npc.position.z / CELL_SIZE);
+      // Road-following AI (skip if scared / fleeing from honk)
+      if (npc.scaredTimer <= 0) {
+        const gx = Math.round(npc.position.x / CELL_SIZE - 0.5);
+        const gz = Math.round(npc.position.z / CELL_SIZE - 0.5);
 
+        // Check if NPC is off-road, steer back
         if (!this.city.isRoad(gx, gz)) {
           const roadPos = this.findNearestRoad(npc.position);
           if (roadPos) {
             const dx = roadPos.x - npc.position.x;
             const dz = roadPos.z - npc.position.z;
             npc.rotation = Math.atan2(dx, dz);
+            npc.direction.set(Math.sin(npc.rotation), 0, Math.cos(npc.rotation));
           }
         } else {
-          npc.rotation += (Math.random() - 0.5) * Math.PI * 0.8;
+          // Check for intersection: cell where both x%3==0 and z%3==0
+          const isIntersection = (gx % 3 === 0) && (gz % 3 === 0);
+          const intKey = gx + ',' + gz;
+          const intCenterX = gx * CELL_SIZE + HALF_CELL;
+          const intCenterZ = gz * CELL_SIZE + HALF_CELL;
+          const distToCenter = Math.abs(npc.position.x - intCenterX) + Math.abs(npc.position.z - intCenterZ);
+
+          if (isIntersection && distToCenter < INTERSECTION_THRESHOLD && npc.lastIntersection !== intKey) {
+            npc.lastIntersection = intKey;
+
+            // Determine valid turn directions at this intersection
+            const possibleDirs = [];
+            for (let d = 0; d < 4; d++) {
+              const nextGx = gx + DIR_DX[d];
+              const nextGz = gz + DIR_DZ[d];
+              if (this.city.isRoad(nextGx, nextGz)) {
+                possibleDirs.push(d);
+              }
+            }
+
+            if (possibleDirs.length > 0) {
+              // Weighted choice: prefer straight, then left/right, U-turn rare
+              const straight = npc.roadDir;
+              const left = (npc.roadDir + 3) % 4;
+              const right = (npc.roadDir + 1) % 4;
+              const uturn = (npc.roadDir + 2) % 4;
+
+              const weighted = [];
+              for (const d of possibleDirs) {
+                if (d === straight) { weighted.push(d, d, d, d, d); } // weight 5
+                else if (d === left || d === right) { weighted.push(d, d); } // weight 2
+                else if (d === uturn) { weighted.push(d); } // weight 1
+              }
+
+              if (weighted.length > 0) {
+                npc.roadDir = weighted[Math.floor(Math.random() * weighted.length)];
+              } else {
+                npc.roadDir = possibleDirs[Math.floor(Math.random() * possibleDirs.length)];
+              }
+            }
+          }
+
+          // Set direction from roadDir
+          const dx = DIR_DX[npc.roadDir];
+          const dz = DIR_DZ[npc.roadDir];
+          npc.direction.set(dx, 0, dz);
+          npc.rotation = DIR_ROT[npc.roadDir];
+
+          // Lane discipline: offset perpendicular to travel direction
+          // +X or +Z directions get positive perpendicular offset (drive on right side)
+          // Perpendicular to (dx, dz) is (dz, -dx) for right-side offset
+          const laneSign = (npc.roadDir === 0 || npc.roadDir === 1) ? 1 : -1;
+          const perpX = dz * laneSign;
+          const perpZ = -dx * laneSign;
+
+          // Target position: road center + lane offset (along perpendicular axis)
+          const roadCenterX = gx * CELL_SIZE + HALF_CELL;
+          const roadCenterZ = gz * CELL_SIZE + HALF_CELL;
+          const targetX = roadCenterX + perpX * LANE_OFFSET;
+          const targetZ = roadCenterZ + perpZ * LANE_OFFSET;
+
+          // Gently steer toward lane target (only on the perpendicular axis)
+          const laneSteer = 3.0;
+          if (Math.abs(dx) > 0) {
+            // Moving along X, steer Z toward lane
+            npc.position.z += (targetZ - npc.position.z) * laneSteer * delta;
+          } else {
+            // Moving along Z, steer X toward lane
+            npc.position.x += (targetX - npc.position.x) * laneSteer * delta;
+          }
         }
-        npc.direction.set(Math.sin(npc.rotation), 0, Math.cos(npc.rotation));
       }
 
       // Move
@@ -309,6 +398,7 @@ export class Traffic {
       npc.mesh.position.set(npc.position.x, 0, npc.position.z);
       npc.mesh.rotation.y = npc.rotation;
     }
+    this.rebuildSpatialHash();
   }
 
   addMore(extra) {
@@ -323,19 +413,54 @@ export class Traffic {
   }
 
   findNearestRoad(position) {
+    const gx = Math.round(Math.floor(position.x / CELL_SIZE) / 3) * 3;
+    const gz = Math.round(Math.floor(position.z / CELL_SIZE) / 3) * 3;
     let nearest = null;
     let nearestDist = Infinity;
-    for (const rp of this.city.getRoadPositions()) {
-      const dx = position.x - rp.x;
-      const dz = position.z - rp.z;
-      const d = dx * dx + dz * dz;
-      if (d < nearestDist) { nearestDist = d; nearest = rp; }
+    for (let dx = -6; dx <= 6; dx++) {
+      for (let dz = -6; dz <= 6; dz++) {
+        const nx = gx + dx;
+        const nz = gz + dz;
+        if (nx < 0 || nx >= GRID_SIZE || nz < 0 || nz >= GRID_SIZE) continue;
+        if (!this.city.isRoad(nx, nz)) continue;
+        const rx = nx * CELL_SIZE + CELL_SIZE / 2;
+        const rz = nz * CELL_SIZE + CELL_SIZE / 2;
+        const ddx = position.x - rx;
+        const ddz = position.z - rz;
+        const d = ddx * ddx + ddz * ddz;
+        if (d < nearestDist) { nearestDist = d; nearest = { x: rx, z: rz }; }
+      }
     }
     return nearest;
   }
 
+  rebuildSpatialHash() {
+    this._hash = {};
+    for (const npc of this.vehicles) {
+      const key = Math.floor(npc.position.x / CELL_SIZE) + ',' + Math.floor(npc.position.z / CELL_SIZE);
+      if (!this._hash[key]) this._hash[key] = [];
+      this._hash[key].push(npc);
+    }
+  }
+
+  getNearby(worldX, worldZ) {
+    if (!this._hash) return this.vehicles;
+    const gx = Math.floor(worldX / CELL_SIZE);
+    const gz = Math.floor(worldZ / CELL_SIZE);
+    const result = [];
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        const cell = this._hash[(gx + dx) + ',' + (gz + dz)];
+        if (cell) {
+          for (const npc of cell) result.push(npc);
+        }
+      }
+    }
+    return result;
+  }
+
   reset() {
-    for (const npc of this.vehicles) this.scene.remove(npc.mesh);
+    for (const npc of this.vehicles) removeAndDispose(this.scene, npc.mesh);
     this.vehicles = [];
     this.spawnTraffic(this.baseCounts);
   }

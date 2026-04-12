@@ -1,13 +1,15 @@
 import * as THREE from 'three';
-import { CELL_SIZE, GRID_SIZE, COLORS } from './constants.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { CELL_SIZE, GRID_SIZE, COLORS, MAPS } from './constants.js';
 
 export class City {
-  constructor(scene) {
+  constructor(scene, mapId = 'kathmandu') {
     this.scene = scene;
     this.grid = [];
     this.buildingBounds = [];
     this.roadPositions = [];
     this.speedBumps = [];
+    this.mapConfig = MAPS[mapId] || MAPS.kathmandu;
 
     this.generateGrid();
     this.buildGround();
@@ -30,11 +32,13 @@ export class City {
     const nx = worldX / citySize;
     const nz = worldZ / citySize;
 
-    // Layered sine hills
+    // Layered sine hills — amplitude from map config
+    const amp = this.mapConfig.terrainAmplitude;
+    const ts = this.mapConfig.terrainScale;
     let h = 0;
-    h += Math.sin(nx * 3.5 + 0.3) * Math.cos(nz * 2.8 + 0.7) * 4;
-    h += Math.sin(nx * 7.1 + 1.2) * Math.cos(nz * 5.3 + 2.1) * 1.8;
-    h += Math.sin(nx * 12 + 0.5) * Math.sin(nz * 11 + 1.5) * 0.6;
+    h += Math.sin(nx * 3.5 * ts + 0.3) * Math.cos(nz * 2.8 * ts + 0.7) * amp[0];
+    h += Math.sin(nx * 7.1 * ts + 1.2) * Math.cos(nz * 5.3 * ts + 2.1) * amp[1];
+    h += Math.sin(nx * 12 * ts + 0.5) * Math.sin(nz * 11 * ts + 1.5) * amp[2];
 
     // Flatten near roads — check grid cell
     const gx = Math.floor(worldX / CELL_SIZE);
@@ -108,7 +112,7 @@ export class City {
     }
     geo.computeVertexNormals();
 
-    const mat = new THREE.MeshLambertMaterial({ color: COLORS.grass });
+    const mat = new THREE.MeshLambertMaterial({ color: this.mapConfig.grassColor });
     const ground = new THREE.Mesh(geo, mat);
     ground.position.set(size / 2, 0, size / 2);
     ground.receiveShadow = true;
@@ -116,9 +120,11 @@ export class City {
   }
 
   buildRoads() {
-    const roadMat = new THREE.MeshLambertMaterial({ color: COLORS.road });
+    const roadGeos = [];
+    const lineGeos = [];
     const sidewalkMat = new THREE.MeshLambertMaterial({ color: COLORS.sidewalk });
-    const lineMat = new THREE.MeshBasicMaterial({ color: 0x555555 });
+    const baseGeo = new THREE.PlaneGeometry(CELL_SIZE, CELL_SIZE);
+    baseGeo.rotateX(-Math.PI / 2);
 
     for (let x = 0; x < GRID_SIZE; x++) {
       for (let z = 0; z < GRID_SIZE; z++) {
@@ -127,32 +133,44 @@ export class City {
         const px = x * CELL_SIZE + CELL_SIZE / 2;
         const pz = z * CELL_SIZE + CELL_SIZE / 2;
 
-        const road = new THREE.Mesh(new THREE.PlaneGeometry(CELL_SIZE, CELL_SIZE), roadMat);
-        road.rotation.x = -Math.PI / 2;
-        road.position.set(px, 0.01, pz);
-        road.receiveShadow = true;
-        this.scene.add(road);
+        const rg = baseGeo.clone();
+        rg.translate(px, 0.01, pz);
+        roadGeos.push(rg);
 
         // Dashed center line on straight road segments
         const isHorizRoad = x % 3 === 0 && z % 3 !== 0;
         const isVertRoad = z % 3 === 0 && x % 3 !== 0;
         if (isHorizRoad || isVertRoad) {
           for (let d = -3; d <= 3; d += 3) {
-            const lineGeo = new THREE.PlaneGeometry(isVertRoad ? 2.5 : 0.15, isVertRoad ? 0.15 : 2.5);
-            const line = new THREE.Mesh(lineGeo, lineMat);
-            line.rotation.x = -Math.PI / 2;
-            line.position.set(
-              px + (isVertRoad ? d : 0),
-              0.02,
-              pz + (isHorizRoad ? d : 0)
-            );
-            this.scene.add(line);
+            const lg = new THREE.PlaneGeometry(isVertRoad ? 2.5 : 0.15, isVertRoad ? 0.15 : 2.5);
+            lg.rotateX(-Math.PI / 2);
+            lg.translate(px + (isVertRoad ? d : 0), 0.02, pz + (isHorizRoad ? d : 0));
+            lineGeos.push(lg);
           }
         }
 
         this.addSidewalkEdges(x, z, px, pz, sidewalkMat);
         this.roadPositions.push(new THREE.Vector3(px, 0, pz));
       }
+    }
+
+    // Merge all road tiles into one mesh
+    if (roadGeos.length > 0) {
+      const mergedRoad = new THREE.Mesh(
+        mergeGeometries(roadGeos),
+        new THREE.MeshLambertMaterial({ color: COLORS.road })
+      );
+      mergedRoad.receiveShadow = true;
+      this.scene.add(mergedRoad);
+    }
+
+    // Merge all center lines into one mesh
+    if (lineGeos.length > 0) {
+      const mergedLines = new THREE.Mesh(
+        mergeGeometries(lineGeos),
+        new THREE.MeshBasicMaterial({ color: 0x555555 })
+      );
+      this.scene.add(mergedLines);
     }
   }
 
@@ -187,11 +205,13 @@ export class City {
   }
 
   createBuilding(gx, gz, rng) {
-    const height = 6 + rng() * 24;
+    const [hMin, hMax] = this.mapConfig.buildingHeightRange;
+    const height = hMin + rng() * (hMax - hMin);
     const margin = 1.2 + rng() * 1.8;
     const width = CELL_SIZE - margin * 2;
     const depth = CELL_SIZE - margin * 2;
-    const color = COLORS.buildings[Math.floor(rng() * COLORS.buildings.length)];
+    const bColors = this.mapConfig.buildingColors;
+    const color = bColors[Math.floor(rng() * bColors.length)];
 
     const px = gx * CELL_SIZE + CELL_SIZE / 2;
     const pz = gz * CELL_SIZE + CELL_SIZE / 2;
@@ -426,7 +446,7 @@ export class City {
     for (let x = 0; x < GRID_SIZE; x++) {
       for (let z = 0; z < GRID_SIZE; z++) {
         if (this.grid[x][z] !== 'road') continue;
-        if (rng() > 0.1) continue;
+        if (rng() > this.mapConfig.treeChance) continue;
 
         const px = x * CELL_SIZE + CELL_SIZE / 2 + (rng() > 0.5 ? 1 : -1) * (CELL_SIZE * 0.4);
         const pz = z * CELL_SIZE + CELL_SIZE / 2 + (rng() > 0.5 ? 1 : -1) * (CELL_SIZE * 0.4);
@@ -827,6 +847,46 @@ export class City {
   getSpeedBumps() { return this.speedBumps; }
   getBuildingBounds() { return this.buildingBounds; }
   getRoadPositions() { return this.roadPositions; }
+
+  // Spatial grid for fast building collision lookups
+  buildSpatialGrid() {
+    const cellSize = CELL_SIZE;
+    this._spatialCellSize = cellSize;
+    this._spatialGrid = {};
+    for (const b of this.buildingBounds) {
+      const x0 = Math.floor(b.minX / cellSize);
+      const x1 = Math.floor(b.maxX / cellSize);
+      const z0 = Math.floor(b.minZ / cellSize);
+      const z1 = Math.floor(b.maxZ / cellSize);
+      for (let gx = x0; gx <= x1; gx++) {
+        for (let gz = z0; gz <= z1; gz++) {
+          const key = gx + ',' + gz;
+          if (!this._spatialGrid[key]) this._spatialGrid[key] = [];
+          this._spatialGrid[key].push(b);
+        }
+      }
+    }
+  }
+
+  getNearbyBuildings(worldX, worldZ) {
+    if (!this._spatialGrid) this.buildSpatialGrid();
+    const cs = this._spatialCellSize;
+    const gx = Math.floor(worldX / cs);
+    const gz = Math.floor(worldZ / cs);
+    const seen = new Set();
+    const result = [];
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        const cell = this._spatialGrid[(gx + dx) + ',' + (gz + dz)];
+        if (cell) {
+          for (const b of cell) {
+            if (!seen.has(b)) { seen.add(b); result.push(b); }
+          }
+        }
+      }
+    }
+    return result;
+  }
 
   seededRandom(seed) {
     return function () {

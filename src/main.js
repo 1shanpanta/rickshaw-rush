@@ -32,7 +32,7 @@ const ChromaticAberrationShader = {
     }
   `,
 };
-import { Game } from './Game.js';
+import { Game, STATE } from './Game.js';
 import { Network } from './Network.js';
 
 // --- Scene ---
@@ -43,9 +43,9 @@ scene.fog = new THREE.FogExp2(0xc8dde8, 0.004);
 // --- Renderer ---
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.1;
 document.body.prepend(renderer.domElement);
@@ -59,10 +59,10 @@ const renderPass = new RenderPass(scene, camera);
 composer.addPass(renderPass);
 
 const bloomPass = new UnrealBloomPass(
-  new THREE.Vector2(Math.floor(window.innerWidth / 2), Math.floor(window.innerHeight / 2)),
-  0.35, // strength (subtle by default, dynamic at night)
-  0.4,  // radius
-  0.85  // threshold
+  new THREE.Vector2(Math.floor(window.innerWidth / 4), Math.floor(window.innerHeight / 4)),
+  0.3,  // strength (subtle by default, dynamic at night)
+  0.3,  // radius
+  0.9   // threshold
 );
 composer.addPass(bloomPass);
 
@@ -71,13 +71,13 @@ caPass.uniforms.amount.value = 0.0;
 composer.addPass(caPass);
 
 // --- Lighting ---
-scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-scene.add(new THREE.HemisphereLight(0x87ceeb, 0x5a8c4b, 0.3));
+scene.add(new THREE.AmbientLight(0xffffff, 0.65));
+scene.add(new THREE.HemisphereLight(0x87ceeb, 0x5a8c4b, 0.4));
 
 const sun = new THREE.DirectionalLight(0xfff4e0, 0.9);
 sun.position.set(150, 120, 100);
 sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.mapSize.set(1024, 1024);
 sun.shadow.camera.near = 1;
 sun.shadow.camera.far = 500;
 sun.shadow.camera.left = -200;
@@ -99,21 +99,47 @@ const keys = {};
 window.addEventListener('keydown', (e) => {
   keys[e.code] = true;
 
-  if (game.state === 'menu' || game.state === 'gameover') {
+  if (game.state === STATE.MENU || game.state === STATE.GAMEOVER) {
     if (e.code === 'Digit1' || e.code === 'Enter') {
       game.setMode('single');
       game.handleStart();
     }
   }
 
-  if (e.code === 'Tab' && game.state === 'playing' && game.mode === 'single') {
+  if (e.code === 'Tab' && (game.state === STATE.PLAYING || game.state === STATE.PAUSED) && game.mode === 'single') {
     e.preventDefault();
-    game.toggleFullmap();
+    if (game.fullmapOpen) {
+      game.toggleFullmap();
+    } else if (game.state === STATE.PLAYING) {
+      game.toggleFullmap();
+    }
+  }
+
+  // ESC: close fullmap, or toggle pause menu
+  if (e.code === 'Escape') {
+    e.preventDefault();
+    if (game.fullmapOpen) {
+      game.toggleFullmap();
+    } else if (game.state === STATE.PLAYING) {
+      pauseGame();
+    } else if (game.state === STATE.PAUSED) {
+      resumeGame();
+    }
   }
 
   // Photo mode
-  if (e.code === 'KeyP' && game.state === 'playing') {
+  if (e.code === 'KeyP' && game.state === STATE.PLAYING) {
     game.togglePhotoMode();
+  }
+
+  // Music toggle
+  if (e.code === 'KeyM') {
+    toggleMusicUI();
+  }
+
+  // Headlight toggle
+  if (e.code === 'KeyL' && (game.state === STATE.PLAYING || game.state === STATE.PAUSED)) {
+    game.vehicle.toggleHeadlights();
   }
 
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) {
@@ -125,6 +151,44 @@ window.addEventListener('keyup', (e) => { keys[e.code] = false; });
 
 // --- Lobby UI ---
 const $ = (id) => document.getElementById(id);
+
+// --- Pause / Resume ---
+function pauseGame() {
+  if (game.state !== STATE.PLAYING) return;
+  game.setState(STATE.PAUSED);
+  $('pause-menu')?.classList.add('active');
+}
+function resumeGame() {
+  if (game.state !== STATE.PAUSED) return;
+  game.setState(STATE.PLAYING);
+  $('pause-menu')?.classList.remove('active');
+}
+$('btn-resume')?.addEventListener('click', resumeGame);
+$('btn-exit-menu')?.addEventListener('click', () => {
+  $('pause-menu')?.classList.remove('active');
+  game.gameOver();
+});
+
+// --- Music toggle ---
+function toggleMusicUI() {
+  const muted = game.music.toggleMute();
+  const btn = $('music-toggle');
+  if (btn) {
+    btn.textContent = muted ? '♪' : '♫';
+    btn.classList.toggle('muted', muted);
+  }
+}
+$('music-toggle')?.addEventListener('click', toggleMusicUI);
+
+// Map selection
+document.querySelectorAll('.map-card').forEach(card => {
+  card.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('.map-card').forEach(c => c.classList.remove('selected'));
+    card.classList.add('selected');
+    game.setMap(card.dataset.map);
+  });
+});
 
 // Solo button
 $('btn-solo')?.addEventListener('click', (e) => {
@@ -245,7 +309,7 @@ function updateLobbyPlayers(players) {
 window.addEventListener('click', (e) => {
   if (e.target.closest('#screen-overlay')) return;
   if (e.target.closest('#touch-controls')) return;
-  if (game.state === 'playing' && !game.photoMode && (game.mode === 'single' || game.mode === 'online')) {
+  if (game.state === STATE.PLAYING && !game.photoMode && (game.mode === 'single' || game.mode === 'online')) {
     if (game.projectiles.fire(game.vehicle.position, game.vehicle.rotation, game.vehicle.speed)) {
       game.music.playHonk();
       if (game.mode === 'online') {
@@ -368,7 +432,7 @@ animate();
 // --- Menu background animation (orbiting camera before game starts) ---
 let menuAngle = 0;
 const menuAnimateInterval = setInterval(() => {
-  if (game.state === 'menu') {
+  if (game.state === STATE.MENU) {
     menuAngle += 0.003;
     const cityCenter = 20 * 22;
     const radius = 200;
