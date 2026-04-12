@@ -472,7 +472,42 @@ export class Game {
     this.traffic.reset();
     this.wildlife.reset();
     this.rivalAI.reset();
-    this.rivalAI.spawn(1);
+    // Race setup — pick a destination and spawn 3 AI racers
+    const roads = this.city.getRoadPositions();
+    const startPos = this.vehicle.position;
+    // Pick a destination far from start
+    let bestDest = null;
+    let bestDist = 0;
+    for (let i = 0; i < 20; i++) {
+      const rp = roads[Math.floor(Math.random() * roads.length)];
+      const d = startPos.distanceTo(rp);
+      if (d > bestDist) { bestDist = d; bestDest = rp.clone(); }
+    }
+    this.raceDestination = bestDest;
+    this.playerFinished = false;
+    this.playerFinishTime = 0;
+    this._raceEndTimer = null;
+
+    // Destination marker in 3D
+    if (this._destMarker) this.scene.remove(this._destMarker);
+    this._destMarker = new THREE.Group();
+    const beacon = new THREE.Mesh(
+      new THREE.CylinderGeometry(3, 3, 40, 8, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0x4ade80, transparent: true, opacity: 0.15, side: THREE.DoubleSide })
+    );
+    beacon.position.y = 20;
+    this._destMarker.add(beacon);
+    const flag = new THREE.Mesh(
+      new THREE.BoxGeometry(1, 4, 0.1),
+      new THREE.MeshBasicMaterial({ color: 0x4ade80 })
+    );
+    flag.position.y = 6;
+    this._destMarker.add(flag);
+    this._destMarker.position.set(this.raceDestination.x, 0, this.raceDestination.z);
+    this.scene.add(this._destMarker);
+
+    this.rivalAI.setDestination(this.raceDestination);
+    this.rivalAI.spawn(3);
 
     // Clean time bonuses
     for (const tb of this.timeBonuses) removeAndDispose(this.scene, tb.mesh);
@@ -690,14 +725,32 @@ export class Game {
     const result = this.passengers.update(delta, this.vehicle.position, this.gameTime);
     if (result) this.handlePassengerEvent(result);
 
-    // Rival AI
-    const rivalResult = this.rivalAI.update(delta, this.passengers, this.city.getBuildingBounds());
-    if (rivalResult && rivalResult.type === 'rival-stole') {
-      this.showPassengerInfo('Rival stole your passenger! Find another one!');
-      this.music.playViolation();
-      this.passengers.spawnPassenger();
-      setTimeout(() => this.hidePassengerInfo(), 2500);
+    // Rival AI racers
+    this.rivalAI.update(delta, this.city.getNearbyBuildings(this.vehicle.position.x, this.vehicle.position.z), this.gameTime);
+
+    // Check if player reached destination
+    if (this.raceDestination && !this.playerFinished) {
+      const dx = this.vehicle.position.x - this.raceDestination.x;
+      const dz = this.vehicle.position.z - this.raceDestination.z;
+      if (dx * dx + dz * dz < 64) { // within 8 units
+        this.playerFinished = true;
+        this.playerFinishTime = this.gameTime;
+      }
     }
+
+    // Check if all racers finished or time up
+    if (this.playerFinished || this.rivalAI.getRivals().every(r => r.finished)) {
+      if (!this._raceEndTimer) this._raceEndTimer = 2; // 2 second delay
+      this._raceEndTimer -= delta;
+      if (this._raceEndTimer <= 0) {
+        this._raceEndTimer = null;
+        this.gameOver();
+        return;
+      }
+    }
+
+    // Update race position HUD
+    this.updateRacePosition();
 
     // Weather
     this.updateWeather(delta);
@@ -716,30 +769,23 @@ export class Game {
         this._fireRate = 0.08; // fire every 80ms while held — rapid fire
       }
     }
-    this.projectiles.update(delta, this.traffic, this.wildlife, this.police);
+    this.projectiles.update(delta, this.traffic, this.wildlife, this.police, this.rivalAI);
 
-    // Navigation arrows
-    const dropoff = this.passengers.getDropoffPosition();
-    const pickup = this.passengers.getPickupPosition();
-    const navTarget = dropoff || pickup;
-    // Ground arrows disabled — using HUD arrow instead
-
-    // HUD direction arrow
+    // HUD direction arrow — points to race destination
     const hudArrow = document.getElementById('hud-arrow');
     if (hudArrow) {
-      if (navTarget) {
+      if (this.raceDestination && !this.playerFinished) {
         hudArrow.style.display = 'block';
-        const dx = navTarget.x - this.vehicle.position.x;
-        const dz = navTarget.z - this.vehicle.position.z;
+        const dx = this.raceDestination.x - this.vehicle.position.x;
+        const dz = this.raceDestination.z - this.vehicle.position.z;
         const dist = Math.sqrt(dx * dx + dz * dz);
         const angle = Math.atan2(dx, dz) - this.vehicle.rotation;
         const arrowSvg = hudArrow.querySelector('svg');
         if (arrowSvg) arrowSvg.style.transform = `rotate(${angle * 180 / Math.PI}deg)`;
-        // Color: gold for pickup, green for deliver
         const poly = hudArrow.querySelector('polygon');
-        if (poly) poly.setAttribute('fill', dropoff ? '#4ade80' : '#ffd700');
+        if (poly) poly.setAttribute('fill', '#4ade80');
         const label = document.getElementById('hud-arrow-label');
-        if (label) label.textContent = dropoff ? `DELIVER ${Math.round(dist)}m` : `PICKUP ${Math.round(dist)}m`;
+        if (label) label.textContent = `FINISH ${Math.round(dist)}m`;
       } else {
         hudArrow.style.display = 'none';
       }
@@ -1168,7 +1214,7 @@ export class Game {
   levelUp() {
     this.level++;
     this.traffic.addMore(LEVELS.extraTraffic);
-    if (this.level % 2 === 0) this.rivalAI.spawn(1); // extra rival every 2 levels
+    // Race mode — no extra rivals on level up
 
     const el = this.ui.levelUp;
     el.textContent = `LEVEL ${this.level}!`;
@@ -1358,6 +1404,25 @@ export class Game {
   }
 
   // --- UI ---
+  updateRacePosition() {
+    const positions = this.rivalAI.getPositions(
+      this.vehicle.position, this.playerFinished, this.playerFinishTime, this.gameTime
+    );
+    const playerIdx = positions.findIndex(p => p.isPlayer);
+    const pos = playerIdx + 1;
+    const suffix = pos === 1 ? 'st' : pos === 2 ? 'nd' : pos === 3 ? 'rd' : 'th';
+
+    let raceEl = document.getElementById('race-position');
+    if (!raceEl) {
+      raceEl = document.createElement('div');
+      raceEl.id = 'race-position';
+      raceEl.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:11;pointer-events:none;text-align:center;color:#fff;text-shadow:0 2px 8px rgba(0,0,0,.6)';
+      document.body.appendChild(raceEl);
+    }
+    const posColor = pos === 1 ? '#4ade80' : pos === 2 ? '#fbbf24' : '#ff6b6b';
+    raceEl.innerHTML = `<div style="font-size:48px;font-weight:700;color:${posColor};line-height:1">${pos}${suffix}</div><div style="font-size:12px;opacity:.6">${positions.map((p, i) => `${i + 1}. ${p.name}${p.finished ? ' ✓' : ''}`).join(' &middot; ')}</div>`;
+  }
+
   updateUI() {
     const min = Math.floor(this.timeLeft / 60);
     const sec = Math.floor(this.timeLeft % 60);

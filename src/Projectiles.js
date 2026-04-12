@@ -68,7 +68,7 @@ export class Projectiles {
     return true;
   }
 
-  update(delta, traffic, wildlife, police) {
+  update(delta, traffic, wildlife, police, rivalAI) {
     for (let i = this.balloons.length - 1; i >= 0; i--) {
       const b = this.balloons[i];
       b.life -= delta;
@@ -85,32 +85,50 @@ export class Projectiles {
       // Hit ground
       if (b.position.y < 0.1) hit = true;
 
-      // Hit traffic
+      // Hit traffic — destroy on hit
       if (!hit) {
-        for (const npc of traffic.vehicles) {
+        for (let t = traffic.vehicles.length - 1; t >= 0; t--) {
+          const npc = traffic.vehicles[t];
           const dx = b.position.x - npc.position.x;
           const dz = b.position.z - npc.position.z;
           if (dx * dx + dz * dz < (npc.radius + 0.5) * (npc.radius + 0.5)) {
             hit = true;
-            // Push the NPC hard on hit
-            if (Math.sqrt(dx * dx + dz * dz) > 0.01) {
-              const d = Math.sqrt(dx * dx + dz * dz);
-              npc.position.x += (dx / d) * 3;
-              npc.position.z += (dz / d) * 3;
-              npc.scaredTimer = 4;
+            // Destroy the vehicle
+            if (npc.mesh) {
+              traffic.scene.remove(npc.mesh);
             }
+            traffic.vehicles.splice(t, 1);
             break;
           }
         }
       }
 
-      // Hit wildlife
+      // Hit wildlife — destroy on hit
       if (!hit && wildlife) {
-        for (const a of wildlife.getColliders()) {
+        for (let w = wildlife.animals.length - 1; w >= 0; w--) {
+          const a = wildlife.animals[w];
           const dx = b.position.x - a.position.x;
           const dz = b.position.z - a.position.z;
           if (dx * dx + dz * dz < (a.radius + 1) * (a.radius + 1)) {
             hit = true;
+            if (a.mesh) {
+              wildlife.scene.remove(a.mesh);
+            }
+            wildlife.animals.splice(w, 1);
+            break;
+          }
+        }
+      }
+
+      // Hit rival racers — slow them down
+      if (!hit && rivalAI) {
+        for (const r of rivalAI.getRivals()) {
+          if (r.finished) continue;
+          const dx = b.position.x - r.position.x;
+          const dz = b.position.z - r.position.z;
+          if (dx * dx + dz * dz < (r.radius + 0.5) * (r.radius + 0.5)) {
+            hit = true;
+            rivalAI.hitByBullet(r);
             break;
           }
         }

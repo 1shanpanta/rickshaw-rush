@@ -228,20 +228,10 @@ export class Vehicle {
     // Boost
     if (this.boostCooldownTimer > 0) this.boostCooldownTimer -= delta;
 
-    if (input.boost && this.boostFuel > 0 && this.boostCooldownTimer <= 0 && this.speed > 5) {
+    if (input.boost && this.speed > 5) {
       this.boosting = true;
-      this.boostFuel -= delta;
-      if (this.boostFuel <= 0) {
-        this.boostFuel = 0;
-        this.boostCooldownTimer = VEHICLE.boostCooldown;
-        this.boosting = false;
-      }
     } else {
       this.boosting = false;
-      const boostMax = VEHICLE.boostDuration * this.boostDurationMod;
-      if (this.boostCooldownTimer <= 0 && this.boostFuel < boostMax) {
-        this.boostFuel = Math.min(boostMax, this.boostFuel + delta * 0.4);
-      }
     }
 
     // Boost flame
@@ -286,14 +276,27 @@ export class Vehicle {
       this.rotation -= VEHICLE.turnSpeed * turnFactor * delta * speedSign * grip;
     }
 
-    // Sliding in rain (reduced grip causes drift)
-    if (grip < 1 && absSpeed > 15 && (input.left || input.right)) {
-      const drift = (1 - grip) * 0.3 * absSpeed * delta;
+    // Drift: boost + turn = slide sideways
+    this.drifting = false;
+    const isTurning = input.left || input.right;
+    if (isTurning && absSpeed > 12) {
+      const driftDir = input.left ? 1 : -1;
       const perpX = Math.cos(this.rotation);
       const perpZ = -Math.sin(this.rotation);
-      const driftDir = input.left ? 1 : -1;
-      this.position.x += perpX * drift * driftDir;
-      this.position.z += perpZ * drift * driftDir;
+
+      if (this.boosting) {
+        // Heavy drift while boosting — tail slides out
+        const driftForce = absSpeed * 0.45 * delta;
+        this.position.x += perpX * driftForce * driftDir;
+        this.position.z += perpZ * driftForce * driftDir;
+        this.drifting = true;
+      } else if (grip < 1) {
+        // Rain drift
+        const drift = (1 - grip) * 0.3 * absSpeed * delta;
+        this.position.x += perpX * drift * driftDir;
+        this.position.z += perpZ * drift * driftDir;
+        this.drifting = true;
+      }
     }
 
     // Move
@@ -308,8 +311,9 @@ export class Vehicle {
     this.mesh.position.set(this.position.x, terrainY, this.position.z);
     this.mesh.rotation.y = this.rotation;
 
-    // Tilt
-    const targetTilt = (input.left ? 0.06 : input.right ? -0.06 : 0) * turnFactor;
+    // Tilt — exaggerated during drift
+    const driftTiltMult = this.drifting ? 3.5 : 1;
+    const targetTilt = (input.left ? 0.06 : input.right ? -0.06 : 0) * turnFactor * driftTiltMult;
     this.tiltAngle += (targetTilt - this.tiltAngle) * Math.min(8 * delta, 1);
     this.mesh.rotation.z = this.tiltAngle;
 
