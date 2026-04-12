@@ -3,7 +3,7 @@ import { City } from './City.js';
 import { Vehicle } from './Vehicle.js';
 import { Traffic } from './Traffic.js';
 import { TrafficLights } from './TrafficLights.js';
-import { PassengerSystem } from './Passenger.js';
+// Passenger system disabled — race mode
 import { Wildlife } from './Wildlife.js';
 import { Projectiles } from './Projectiles.js';
 // Navigation arrows disabled — using HUD arrow
@@ -67,16 +67,11 @@ export class Game {
 
     // Game state
     this.score = 0;
+    this.health = 100;
     this.timeLeft = GAME.totalTime;
     this.gameTime = 0;
-    this.deliveries = 0;
-    this.combo = 0;
-    this.comboTimer = 0;
-    this.nearMisses = 0;
-    this.totalStars = 0;
     this.violations = 0;
     this.fines = 0;
-    this.level = 1;
     this.highScore = parseInt(localStorage.getItem('rickshaw-rush-hs') || '0', 10);
     this.topScores = JSON.parse(localStorage.getItem('rickshaw-rush-top5') || '[]');
 
@@ -221,7 +216,7 @@ export class Game {
     this.trafficLights = new TrafficLights(scene, this.city);
     this.vehicle = new Vehicle(scene);
     this.traffic = new Traffic(scene, this.city, this.trafficLights);
-    this.passengers = new PassengerSystem(scene, this.city);
+    // Passengers disabled — race mode
     this.wildlife = new Wildlife(scene, this.city);
     this.projectiles = new Projectiles(scene);
     // Navigation ground arrows disabled — using HUD arrow
@@ -451,14 +446,8 @@ export class Game {
     this.health = 100;
     this.timeLeft = GAME.totalTime;
     this.gameTime = 0;
-    this.deliveries = 0;
-    this.combo = 0;
-    this.comboTimer = 0;
-    this.nearMisses = 0;
-    this.totalStars = 0;
     this.violations = 0;
     this.fines = 0;
-    this.level = 1;
     this.isRaining = false;
     this.rainCooldown = 30;
 
@@ -468,7 +457,7 @@ export class Game {
     this.vehicle.rotation = 0;
     this.vehicle.gripMultiplier = 1;
 
-    this.passengers.reset();
+    
     this.traffic.reset();
     this.wildlife.reset();
     this.rivalAI.reset();
@@ -484,6 +473,8 @@ export class Game {
       if (d > bestDist) { bestDist = d; bestDest = rp.clone(); }
     }
     this.raceDestination = bestDest;
+    this.currentRound = 1;
+    this.totalRounds = 3;
     this.playerFinished = false;
     this.playerFinishTime = 0;
     this._raceEndTimer = null;
@@ -657,15 +648,6 @@ export class Game {
     this.timeLeft -= delta;
     if (this.timeLeft <= 0) { this.timeLeft = 0; this.gameOver(); return; }
 
-    // Combo decay
-    if (this.comboTimer > 0) {
-      this.comboTimer -= delta;
-      if (this.comboTimer <= 0) {
-        this.combo = 0;
-        this.ui.comboDisplay.classList.remove('visible');
-      }
-    }
-
     // Cooldowns
     if (this.redLightCooldown > 0) this.redLightCooldown -= delta;
     if (this.crashFineCooldown > 0) this.crashFineCooldown -= delta;
@@ -720,10 +702,7 @@ export class Game {
     // Pigeon scatter
     if (this.city.pigeonGroups) this.updatePigeonScatter(delta);
 
-    // Passengers
-    this.passengers.setSurge(this.isRaining);
-    const result = this.passengers.update(delta, this.vehicle.position, this.gameTime);
-    if (result) this.handlePassengerEvent(result);
+    // Passengers disabled in race mode
 
     // Rival AI racers
     this.rivalAI.update(delta, this.city.getNearbyBuildings(this.vehicle.position.x, this.vehicle.position.z), this.gameTime);
@@ -738,14 +717,25 @@ export class Game {
       }
     }
 
-    // Check if all racers finished or time up
+    // Check if round ended (player or all AI finished)
     if (this.playerFinished || this.rivalAI.getRivals().every(r => r.finished)) {
-      if (!this._raceEndTimer) this._raceEndTimer = 2; // 2 second delay
+      if (!this._raceEndTimer) this._raceEndTimer = 2;
       this._raceEndTimer -= delta;
       if (this._raceEndTimer <= 0) {
         this._raceEndTimer = null;
-        this.gameOver();
-        return;
+        // Score points based on position
+        const positions = this.rivalAI.getPositions(this.vehicle.position, this.playerFinished, this.playerFinishTime, this.gameTime);
+        const playerPos = positions.findIndex(p => p.isPlayer);
+        const roundPoints = [500, 300, 150, 50];
+        this.score += roundPoints[playerPos] || 0;
+
+        this.currentRound++;
+        if (this.currentRound > this.totalRounds) {
+          this.gameOver();
+          return;
+        }
+        // Start next round
+        this.startNextRound();
       }
     }
 
@@ -776,16 +766,20 @@ export class Game {
     if (hudArrow) {
       if (this.raceDestination && !this.playerFinished) {
         hudArrow.style.display = 'block';
-        const dx = this.raceDestination.x - this.vehicle.position.x;
-        const dz = this.raceDestination.z - this.vehicle.position.z;
-        const dist = Math.sqrt(dx * dx + dz * dz);
-        const angle = Math.atan2(dx, dz) - this.vehicle.rotation;
+        // Project destination to screen space — always accurate regardless of camera angle
+        const dest3D = new THREE.Vector3(this.raceDestination.x, 2, this.raceDestination.z);
+        const projected = dest3D.clone().project(this.camera);
+        // projected.x/y are in NDC (-1 to 1), where +x = right, +y = up
+        const screenAngle = Math.atan2(projected.x, projected.y);
         const arrowSvg = hudArrow.querySelector('svg');
-        if (arrowSvg) arrowSvg.style.transform = `rotate(${angle * 180 / Math.PI}deg)`;
+        if (arrowSvg) arrowSvg.style.transform = `rotate(${screenAngle * 180 / Math.PI}deg)`;
         const poly = hudArrow.querySelector('polygon');
         if (poly) poly.setAttribute('fill', '#4ade80');
+        const dx = this.raceDestination.x - this.vehicle.position.x;
+        const dz = this.raceDestination.z - this.vehicle.position.z;
+        const dist = Math.round(Math.sqrt(dx * dx + dz * dz));
         const label = document.getElementById('hud-arrow-label');
-        if (label) label.textContent = `FINISH ${Math.round(dist)}m`;
+        if (label) label.textContent = `FINISH ${dist}m`;
       } else {
         hudArrow.style.display = 'none';
       }
@@ -1015,7 +1009,7 @@ export class Game {
           this.vehicle.speed = -Math.sign(this.vehicle.speed || 1) * bounceForce;
           this.shakeIntensity = 0.3;
           this.health -= 5;
-          this.passengers.recordCrash();
+          
           if (this.music.playCollisionThud) this.music.playCollisionThud(Math.min(Math.abs(this.vehicle.speed) / 40, 1));
           this.crashFineCooldown = 0.5;
           const flash = document.getElementById('screen-flash');
@@ -1060,7 +1054,7 @@ export class Game {
           this.vehicle.speed = -Math.sign(this.vehicle.speed || 1) * bounceForce;
           this.shakeIntensity = 0.3;
           this.health -= 10;
-          this.passengers.recordCrash();
+          
           if (this.health <= 0) { this.health = 0; this.gameOver(); return; }
           if (this.music.playCollisionThud) this.music.playCollisionThud(Math.min(vSpeed / 40, 1));
           const flash = document.getElementById('screen-flash');
@@ -1112,7 +1106,7 @@ export class Game {
           this.vehicle.speed = -Math.sign(this.vehicle.speed || 1) * bounceForce;
           this.shakeIntensity = 0.5;
           this.health -= 8;
-          this.passengers.recordCrash();
+          
           this.crashFineCooldown = 0.5;
           const flash = document.getElementById('screen-flash');
           if (flash) { flash.style.background = 'rgba(255,50,50,0.25)'; flash.style.opacity = '1'; setTimeout(() => { flash.style.opacity = '0'; }, 150); }
@@ -1132,7 +1126,7 @@ export class Game {
       this.violations++;
       this.fines += TRAFFIC_LIGHT.fineAmount;
       this.score = Math.max(0, this.score - TRAFFIC_LIGHT.fineAmount);
-      this.passengers.recordRedLight();
+      
       this.redLightCooldown = 3;
       this.showViolation();
       this.showDialogue('redLight');
@@ -1420,7 +1414,41 @@ export class Game {
       document.body.appendChild(raceEl);
     }
     const posColor = pos === 1 ? '#4ade80' : pos === 2 ? '#fbbf24' : '#ff6b6b';
-    raceEl.innerHTML = `<div style="font-size:48px;font-weight:700;color:${posColor};line-height:1">${pos}${suffix}</div><div style="font-size:12px;opacity:.6">${positions.map((p, i) => `${i + 1}. ${p.name}${p.finished ? ' ✓' : ''}`).join(' &middot; ')}</div>`;
+    const roundText = `Round ${this.currentRound}/${this.totalRounds}`;
+    raceEl.innerHTML = `<div style="font-size:48px;font-weight:700;color:${posColor};line-height:1">${pos}${suffix}</div><div style="font-size:11px;opacity:.5;margin-top:2px">${roundText}</div><div style="font-size:12px;opacity:.6">${positions.map((p, i) => `${i + 1}. ${p.name}${p.finished ? ' ✓' : ''}`).join(' &middot; ')}</div>`;
+  }
+
+  startNextRound() {
+    // Pick new destination far from current position
+    const roads = this.city.getRoadPositions();
+    let bestDest = null;
+    let bestDist = 0;
+    for (let i = 0; i < 20; i++) {
+      const rp = roads[Math.floor(Math.random() * roads.length)];
+      const d = this.vehicle.position.distanceTo(rp);
+      if (d > bestDist) { bestDist = d; bestDest = rp.clone(); }
+    }
+    this.raceDestination = bestDest;
+    this.playerFinished = false;
+    this.playerFinishTime = 0;
+
+    // Move destination marker
+    if (this._destMarker) {
+      this._destMarker.position.set(this.raceDestination.x, 0, this.raceDestination.z);
+    }
+
+    // Reset rival racers — new destination, not finished
+    this.rivalAI.setDestination(this.raceDestination);
+    for (const r of this.rivalAI.getRivals()) {
+      r.finished = false;
+      r.finishTime = 0;
+      r.target = this.raceDestination.clone();
+      r.slowTimer = 0;
+    }
+
+    // Flash round announcement
+    this.showPassengerInfo(`ROUND ${this.currentRound} — GO!`);
+    setTimeout(() => this.hidePassengerInfo(), 2000);
   }
 
   updateUI() {
@@ -1428,13 +1456,9 @@ export class Game {
     const sec = Math.floor(this.timeLeft % 60);
     this.ui.timer.textContent = `${min}:${sec.toString().padStart(2, '0')}`;
     this.ui.timer.className = this.timeLeft < 20 ? 'vl warn' : 'vl';
-    this.ui.score.textContent = `Rs. ${this.score}`;
-    this.ui.deliveries.textContent = `${this.deliveries}`;
-    this.ui.levelNum.textContent = this.level;
-
-    // Stars
-    const maxStars = this.deliveries * 3;
-    this.ui.starsEarned.textContent = maxStars > 0 ? `${'★'.repeat(this.totalStars)}${'☆'.repeat(maxStars - this.totalStars)}` : '';
+    this.ui.score.textContent = `${this.score} pts`;
+    if (this.ui.deliveries) this.ui.deliveries.textContent = `R${this.currentRound || 1}`;
+    if (this.ui.levelNum) this.ui.levelNum.textContent = this.totalRounds || 3;
 
     // Health bar
     const hb = document.getElementById('health-bar');
@@ -1442,29 +1466,10 @@ export class Game {
 
     // Speedometer
     const kmh = this.vehicle.getSpeedKmh();
-    this.ui.speedoValue.textContent = kmh;
-    this.ui.speedoBar.style.height = `${Math.min(kmh / 150 * 100, 100)}%`;
 
-    // Boost gauge
-    const boostPct = (this.vehicle.boostFuel / 2.5) * 100;
-    this.ui.boostBar.style.height = `${boostPct}%`;
-    this.ui.boostStatus.textContent = this.vehicle.boostCooldownTimer > 0 ? 'RECHARGING' : 'SHIFT';
-
-    // Fare meter
-    if (this.passengers.isCarrying()) {
-      this.ui.fareValue.textContent = `Rs. ${this.passengers.getFare()}`;
-    }
-
-    // Ammo dots
-    let dotsHtml = '';
-    for (let i = 0; i < this.projectiles.maxAmmo; i++) {
-      dotsHtml += `<div class="ammo-dot${i >= this.projectiles.ammo ? ' empty' : ''}"></div>`;
-    }
-    this.ui.ammoDots.innerHTML = dotsHtml;
-
-    // Crosshair visibility (show when moving fast)
+    // Crosshair visibility
     const fast = Math.abs(this.vehicle.speed) > 10;
-    this.ui.crosshair.classList.toggle('active', fast && this.projectiles.ammo > 0);
+    this.ui.crosshair.classList.toggle('active', fast);
   }
 
   // --- Exhaust ---
@@ -1746,14 +1751,27 @@ export class Game {
       ctx.stroke();
     }
 
-    // Objectives
-    const pickup = this.passengers.getPickupPosition();
-    const dropoff = this.passengers.getDropoffPosition();
-    if (pickup) {
-      this.drawMapMarker(ctx, pickup.x * s, pickup.z * s, '#ffd700', 'PICKUP');
+    // Race destination
+    if (this.raceDestination) {
+      this.drawMapMarker(ctx, this.raceDestination.x * s, this.raceDestination.z * s, '#4ade80', 'FINISH');
     }
-    if (dropoff) {
-      this.drawMapMarker(ctx, dropoff.x * s, dropoff.z * s, '#4ade80', 'DELIVER');
+
+    // Rival racers on fullmap
+    const fmRivalColors = ['#cc3333', '#cc8800', '#8833cc'];
+    const fmRivalNames = ['RED', 'GOLD', 'PURPLE'];
+    for (let i = 0; i < this.rivalAI.getRivals().length; i++) {
+      const r = this.rivalAI.getRivals()[i];
+      ctx.fillStyle = fmRivalColors[i % fmRivalColors.length];
+      ctx.beginPath();
+      ctx.arc(r.position.x * s, r.position.z * s, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 9px Rajdhani';
+      ctx.textAlign = 'center';
+      ctx.fillText(fmRivalNames[i], r.position.x * s, r.position.z * s - 10);
     }
 
     // Player
@@ -1911,6 +1929,33 @@ export class Game {
       }
     }
 
+    // Rival racers on minimap
+    const rivalColors = ['#cc3333', '#cc8800', '#8833cc'];
+    for (let i = 0; i < this.rivalAI.getRivals().length; i++) {
+      const r = this.rivalAI.getRivals()[i];
+      const rx = wx(r.position.x);
+      const rz = wz(r.position.z);
+      if (Math.abs(rx) > cx + 5 || Math.abs(rz) > cy + 5) continue;
+      ctx.fillStyle = rivalColors[i % rivalColors.length];
+      ctx.beginPath();
+      ctx.arc(rx, rz, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+    }
+
+    // Race destination on minimap
+    if (this.raceDestination) {
+      const fx = wx(this.raceDestination.x);
+      const fz = wz(this.raceDestination.z);
+      const pulse = 5 + Math.sin(time * 3) * 2;
+      ctx.fillStyle = 'rgba(74,222,128,.2)';
+      ctx.beginPath(); ctx.arc(fx, fz, pulse + 3, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#4ade80';
+      ctx.beginPath(); ctx.arc(fx, fz, 4, 0, Math.PI * 2); ctx.fill();
+    }
+
     // Time bonuses
     ctx.fillStyle = '#22d3ee';
     for (const tb of this.timeBonuses) {
@@ -1935,27 +1980,7 @@ export class Game {
       ctx.stroke();
     }
 
-    // Passenger markers
-    const pickup = this.passengers.getPickupPosition();
-    const dropoff = this.passengers.getDropoffPosition();
-    if (pickup) {
-      const px = wx(pickup.x);
-      const pz = wz(pickup.z);
-      const pulse = 4 + Math.sin(time * 2) * 1.5;
-      ctx.fillStyle = 'rgba(255,215,0,.15)';
-      ctx.beginPath(); ctx.arc(px, pz, pulse + 3, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#ffd700';
-      ctx.beginPath(); ctx.arc(px, pz, 4, 0, Math.PI * 2); ctx.fill();
-    }
-    if (dropoff) {
-      const dx = wx(dropoff.x);
-      const dz = wz(dropoff.z);
-      const pulse = 4 + Math.sin(time * 2 + 1) * 1.5;
-      ctx.fillStyle = 'rgba(74,222,128,.15)';
-      ctx.beginPath(); ctx.arc(dx, dz, pulse + 3, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#4ade80';
-      ctx.beginPath(); ctx.arc(dx, dz, 4, 0, Math.PI * 2); ctx.fill();
-    }
+    // Race destination on minimap (already added above with rivals)
 
     ctx.restore(); // end rotation
 
@@ -1999,11 +2024,10 @@ export class Game {
     ctx.textBaseline = 'middle';
     ctx.fillText('N', nX, nY);
 
-    // Distance to objective
-    const target = dropoff || pickup;
-    if (target) {
+    // Distance to finish
+    if (this.raceDestination) {
       const dist = Math.round(Math.sqrt(
-        (pPos.x - target.x) ** 2 + (pPos.z - target.z) ** 2
+        (pPos.x - this.raceDestination.x) ** 2 + (pPos.z - this.raceDestination.z) ** 2
       ));
       this.ui.minimapDist.textContent = `${dist}m`;
     } else {
@@ -2741,10 +2765,16 @@ export class Game {
 
   // --- Game Over ---
   gameOver() {
-    // Brief slow-mo before showing overlay
-    this.timeScale = 0.2;
-    setTimeout(() => { this.timeScale = 1; this._showGameOver(); }, 800);
-    this.setState(STATE.GAMEOVER);
+    if (this._gameOverPending) return;
+    this._gameOverPending = true;
+    // Brief slow-mo, then transition
+    this.timeScale = 0.3;
+    setTimeout(() => {
+      this.timeScale = 1;
+      this._gameOverPending = false;
+      this.setState(STATE.GAMEOVER);
+      this._showGameOver();
+    }, 800);
   }
 
   _showGameOver() {

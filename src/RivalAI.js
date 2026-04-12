@@ -28,7 +28,7 @@ export class RivalAI {
         position: new THREE.Vector3(rp.x, 0, rp.z),
         rotation: Math.random() * Math.PI * 2,
         speed: 0,
-        maxSpeed: 30 + Math.random() * 10,
+        maxSpeed: 16 + Math.random() * 6,
         target: this.destination ? this.destination.clone() : null,
         mesh: this.createMesh(color, RIVAL_NAMES[i % RIVAL_NAMES.length]),
         radius: 2.5,
