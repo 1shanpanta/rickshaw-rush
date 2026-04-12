@@ -3,15 +3,15 @@ import { CELL_SIZE, GRID_SIZE } from './constants.js';
 import { removeAndDispose } from './utils.js';
 
 const NPC_TYPES = {
-  bus: { colors: [0x2255aa, 0xcc4400, 0x228844, 0x884422], width: 2.5, height: 3, length: 5.5, speed: 7, radius: 3.2 },
-  microbus: { colors: [0xeeeeee, 0xddddaa, 0xccccbb], width: 2, height: 2.2, length: 4, speed: 10, radius: 2.5 },
-  motorcycle: { colors: [0x222222, 0x882222, 0x444444, 0x224488, 0x111111], width: 0.7, height: 1.2, length: 1.4, speed: 18, radius: 1.0 },
-  scooter: { colors: [0x4488aa, 0xaa4466, 0x88aa44], width: 0.6, height: 1, length: 1.2, speed: 14, radius: 0.9 },
-  tempo: { colors: [0x22aa55, 0x2266aa], width: 2, height: 2, length: 3.5, speed: 9, radius: 2.2 },
-  cow: { colors: [0xd2b48c, 0xb89878, 0xe0d0b0, 0xc8a87c], width: 1.4, height: 1.4, length: 2.2, speed: 1.2, radius: 1.5 },
-  car: { colors: [0xcc3333, 0x3333cc, 0x33aa33, 0xdddd33, 0xffffff, 0x222222, 0x884400, 0x666666], width: 1.8, height: 1.5, length: 3.2, speed: 13, radius: 2.0 },
-  truck: { colors: [0x556677, 0x445533, 0x664422], width: 2.4, height: 2.8, length: 6, speed: 6, radius: 3.5 },
-  bicycle: { colors: [0x333333, 0x663333, 0x336633], width: 0.5, height: 1.3, length: 1.5, speed: 7, radius: 0.7 },
+  bus: { colors: [0x2255aa, 0xcc4400, 0x228844, 0x884422], width: 3.5, height: 4, length: 7.5, speed: 7, radius: 4.5 },
+  microbus: { colors: [0xeeeeee, 0xddddaa, 0xccccbb], width: 3, height: 3, length: 5.5, speed: 10, radius: 3.5 },
+  motorcycle: { colors: [0x222222, 0x882222, 0x444444, 0x224488, 0x111111], width: 1.0, height: 1.8, length: 2.2, speed: 18, radius: 1.4 },
+  scooter: { colors: [0x4488aa, 0xaa4466, 0x88aa44], width: 0.9, height: 1.5, length: 1.8, speed: 14, radius: 1.2 },
+  tempo: { colors: [0x22aa55, 0x2266aa], width: 3, height: 2.8, length: 5, speed: 9, radius: 3.2 },
+  cow: { colors: [0xd2b48c, 0xb89878, 0xe0d0b0, 0xc8a87c], width: 2, height: 2, length: 3, speed: 1.2, radius: 2.0 },
+  car: { colors: [0xcc3333, 0x3333cc, 0x33aa33, 0xdddd33, 0xffffff, 0x222222, 0x884400, 0x666666], width: 2.6, height: 2, length: 4.5, speed: 13, radius: 2.8 },
+  truck: { colors: [0x556677, 0x445533, 0x664422], width: 3.5, height: 3.8, length: 8, speed: 6, radius: 4.8 },
+  bicycle: { colors: [0x333333, 0x663333, 0x336633], width: 0.8, height: 1.8, length: 2.2, speed: 7, radius: 1.0 },
 };
 
 const DIR_DX = [1, 0, -1, 0];
@@ -310,7 +310,7 @@ export class Traffic {
           }
         } else {
           // Check for intersection: cell where both x%3==0 and z%3==0
-          const isIntersection = (gx % 3 === 0) && (gz % 3 === 0);
+          const isIntersection = (gx % 2 === 0) && (gz % 2 === 0);
           const intKey = gx + ',' + gz;
           const intCenterX = gx * CELL_SIZE + HALF_CELL;
           const intCenterZ = gz * CELL_SIZE + HALF_CELL;

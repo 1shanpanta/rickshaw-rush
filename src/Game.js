@@ -6,13 +6,13 @@ import { TrafficLights } from './TrafficLights.js';
 import { PassengerSystem } from './Passenger.js';
 import { Wildlife } from './Wildlife.js';
 import { Projectiles } from './Projectiles.js';
-import { Navigation } from './Navigation.js';
+// Navigation arrows disabled — using HUD arrow
 import { MusicSystem } from './Music.js';
 import { RemotePlayer } from './RemotePlayer.js';
 import { RivalAI } from './RivalAI.js';
 import { Effects } from './Effects.js';
 import { Police } from './Police.js';
-import { GAME, CELL_SIZE, GRID_SIZE, TRAFFIC_LIGHT, LEVELS, FARE, MAPS } from './constants.js';
+import { GAME, CELL_SIZE, GRID_SIZE, TRAFFIC_LIGHT, LEVELS, MAPS } from './constants.js';
 import { removeAndDispose } from './utils.js';
 
 // --- State machine ---
@@ -214,6 +214,7 @@ export class Game {
 
     // Map selection (set before start via setMap)
     this.selectedMap = 'kathmandu';
+    this._currentMap = 'kathmandu';
 
     // Systems
     this.city = new City(scene, this.selectedMap);
@@ -223,63 +224,18 @@ export class Game {
     this.passengers = new PassengerSystem(scene, this.city);
     this.wildlife = new Wildlife(scene, this.city);
     this.projectiles = new Projectiles(scene);
-    this.navigation = new Navigation(scene, this.city);
+    // Navigation ground arrows disabled — using HUD arrow
     this.rivalAI = new RivalAI(scene, this.city);
     this.music = new MusicSystem();
     this.effects = new Effects(scene);
     this.police = new Police(scene, this.city, null); // music ref set after init
 
     // Freeze state (police caught)
-    this.frozen = false;
-    this.freezeTimer = 0;
 
     // Exhaust particles
     this.exhaustParticles = [];
     this.exhaustTimer = 0;
 
-    // Vehicle headlights (glow during dusk)
-    this.headlightL = new THREE.PointLight(0xffffaa, 0, 18);
-    this.headlightR = new THREE.PointLight(0xffffaa, 0, 18);
-    scene.add(this.headlightL);
-    scene.add(this.headlightR);
-
-    // Speed trail
-    this.trailLength = 40;
-    this.trailPositions = new Float32Array(this.trailLength * 3);
-    this.trailOpacities = new Float32Array(this.trailLength);
-    const trailGeo = new THREE.BufferGeometry();
-    trailGeo.setAttribute('position', new THREE.BufferAttribute(this.trailPositions, 3));
-    this.speedTrail = new THREE.Line(
-      trailGeo,
-      new THREE.LineBasicMaterial({
-        color: 0x22d3ee,
-        transparent: true,
-        opacity: 0.6,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      })
-    );
-    this.speedTrail.frustumCulled = false;
-    scene.add(this.speedTrail);
-
-    // Glow trail (wider, softer)
-    const glowTrailGeo = new THREE.BufferGeometry();
-    this.glowTrailPositions = new Float32Array(this.trailLength * 3);
-    glowTrailGeo.setAttribute('position', new THREE.BufferAttribute(this.glowTrailPositions, 3));
-    this.glowTrail = new THREE.Points(
-      glowTrailGeo,
-      new THREE.PointsMaterial({
-        color: 0x4ade80,
-        size: 1.2,
-        transparent: true,
-        opacity: 0.3,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      })
-    );
-    this.glowTrail.frustumCulled = false;
-    scene.add(this.glowTrail);
-    this.trailIndex = 0;
 
     // Particles
     this.createDustParticles();
@@ -434,21 +390,65 @@ export class Game {
     }
   }
 
-  // (Local split-screen removed -- using online multiplayer instead)
+  // --- Return to main menu from pause ---
+  returnToMenu() {
+    this.music.stop();
+    this.police.reset();
+    this.effects.cleanup();
+    // Hide gameplay UI
+    this.ui.hud.style.display = 'none';
+    this.ui.controlsHint.style.display = 'none';
+    this.ui.minimap.style.display = 'none';
+    this.ui.speedo.style.display = 'none';
+    this.ui.boostWrap.style.display = 'none';
+    this.ui.ammoWrap.style.display = 'none';
+    this.ui.policeWarning?.classList.remove('active');
+    this.ui.festivalBanner?.classList.remove('active');
+    this.ui.powercutOverlay?.classList.remove('active');
+    const hudArrow = document.getElementById('hud-arrow');
+    if (hudArrow) hudArrow.style.display = 'none';
+    // Show main menu
+    const menuMain = document.getElementById('menu-main');
+    if (menuMain) menuMain.style.display = '';
+    const menuJoin = document.getElementById('menu-join');
+    if (menuJoin) menuJoin.style.display = 'none';
+    const menuLobby = document.getElementById('menu-lobby');
+    if (menuLobby) menuLobby.style.display = 'none';
+    this.ui.overlay.classList.remove('hidden');
+    this.state = STATE.MENU;
+  }
 
   // --- Start / Reset ---
   handleStart() {
     if (this.state !== STATE.MENU && this.state !== STATE.GAMEOVER) return;
+    console.log('[rickshaw] handleStart called, state:', this.state, 'map:', this.selectedMap);
 
+    try {
     this.setState(STATE.PLAYING);
 
-    // Apply map config to scene
-    const mapCfg = MAPS[this.selectedMap] || MAPS.kathmandu;
-    this.scene.background.set(mapCfg.skyColor);
-    if (this.scene.fog) this.scene.fog.color.set(mapCfg.fogColor);
-    if (this.scene.fog) this.scene.fog.density = mapCfg.fogDensity;
+    // Apply map config to scene atmosphere
+    try {
+      const mapCfg = MAPS[this.selectedMap] || MAPS.kathmandu;
+      console.log('[rickshaw] Starting game with map:', this.selectedMap);
+      this.scene.background.set(mapCfg.skyColor);
+      if (this.scene.fog) {
+        this.scene.fog.color.set(mapCfg.fogColor);
+        this.scene.fog.density = mapCfg.fogDensity;
+      }
+      // Update sun intensity per map
+      if (this.sunLight) {
+        this.sunLight.intensity = mapCfg.sunIntensity;
+      }
+      // Update terrain height calculations
+      this.city.mapConfig = mapCfg;
+      this._currentMap = this.selectedMap;
+      console.log('[rickshaw] Map config applied:', mapCfg.name);
+    } catch (e) {
+      console.error('[rickshaw] Failed to apply map config:', e);
+    }
 
     this.score = 0;
+    this.health = 100;
     this.timeLeft = GAME.totalTime;
     this.gameTime = 0;
     this.deliveries = 0;
@@ -530,6 +530,8 @@ export class Game {
     this.ui.boostWrap.style.display = 'block';
     this.ui.rainOverlay.classList.remove('active');
     this.ui.ammoWrap.style.display = 'block';
+    const healthWrap = document.getElementById('health-bar-wrap');
+    if (healthWrap) healthWrap.style.display = 'block';
     this.rainParticles.visible = false;
     this.projectiles.reset();
 
@@ -548,13 +550,15 @@ export class Game {
     // Police
     this.police.reset();
     this.policeCaught = false;
-    this.frozen = false;
-    this.freezeTimer = 0;
 
     // Music
     this.music.init();
     this.music.resume();
     this.police.music = this.music;
+    console.log('[rickshaw] Game started successfully');
+    } catch (e) {
+      console.error('[rickshaw] handleStart FAILED:', e);
+    }
   }
 
   // --- Slow-motion ---
@@ -631,22 +635,6 @@ export class Game {
     if (this.redLightCooldown > 0) this.redLightCooldown -= delta;
     if (this.crashFineCooldown > 0) this.crashFineCooldown -= delta;
 
-    // Freeze state (police caught player)
-    if (this.frozen) {
-      this.freezeTimer -= delta;
-      if (this.freezeTimer <= 0) {
-        this.frozen = false;
-      }
-      // Still update camera and UI while frozen, but skip vehicle input
-      this.vehicle.speed *= 0.9; // bleed off speed
-      this.updateCamera(delta);
-      this.updateUI();
-      if (this.mode === 'single') this.updateMinimap();
-      // Keep police visible during freeze
-      this.police.update(delta, this.vehicle.position, this.city.getNearbyBuildings(this.police.position.x, this.police.position.z));
-      return;
-    }
-
     // Input (in versus mode, arrows are P2-only)
     const isVs = this.mode === 'versus';
     const input = {
@@ -678,7 +666,7 @@ export class Game {
 
     // Collisions
     this.checkBuildingCollisions();
-    this.checkTrafficInteractions();
+    this.checkTrafficInteractions(delta);
     this.checkWildlifeCollisions();
 
     // Speed bumps
@@ -720,32 +708,45 @@ export class Game {
     // Dust particles drift
     this.updateDust(delta);
 
-    // Projectiles
-    if (input.fire && !this._fireCooldown) {
+    // Projectiles — continuous fire with rate limit
+    if (!this._fireRate) this._fireRate = 0;
+    if (this._fireRate > 0) this._fireRate -= delta;
+    if (input.fire && this._fireRate <= 0) {
       if (this.projectiles.fire(this.vehicle.position, this.vehicle.rotation, this.vehicle.speed)) {
-        this.music.playHonk();
-        this._fireCooldown = true;
+        this._fireRate = 0.08; // fire every 80ms while held — rapid fire
       }
     }
-    if (!input.fire) this._fireCooldown = false;
     this.projectiles.update(delta, this.traffic, this.wildlife, this.police);
 
     // Navigation arrows
-    const navTarget = this.passengers.getDropoffPosition() || this.passengers.getPickupPosition();
-    this.navigation.update(this.vehicle.position, navTarget);
+    const dropoff = this.passengers.getDropoffPosition();
+    const pickup = this.passengers.getPickupPosition();
+    const navTarget = dropoff || pickup;
+    // Ground arrows disabled — using HUD arrow instead
+
+    // HUD direction arrow
+    const hudArrow = document.getElementById('hud-arrow');
+    if (hudArrow) {
+      if (navTarget) {
+        hudArrow.style.display = 'block';
+        const dx = navTarget.x - this.vehicle.position.x;
+        const dz = navTarget.z - this.vehicle.position.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        const angle = Math.atan2(dx, dz) - this.vehicle.rotation;
+        const arrowSvg = hudArrow.querySelector('svg');
+        if (arrowSvg) arrowSvg.style.transform = `rotate(${angle * 180 / Math.PI}deg)`;
+        // Color: gold for pickup, green for deliver
+        const poly = hudArrow.querySelector('polygon');
+        if (poly) poly.setAttribute('fill', dropoff ? '#4ade80' : '#ffd700');
+        const label = document.getElementById('hud-arrow-label');
+        if (label) label.textContent = dropoff ? `DELIVER ${Math.round(dist)}m` : `PICKUP ${Math.round(dist)}m`;
+      } else {
+        hudArrow.style.display = 'none';
+      }
+    }
 
     // Exhaust particles
     this.updateExhaust(delta);
-
-    // Headlights (brighter at dusk)
-    const dayProgress = this.gameTime / GAME.totalTime;
-    const hlIntensity = dayProgress > 0.75 ? (dayProgress - 0.75) * 8 : 0;
-    const vRot = this.vehicle.rotation;
-    const vPos = this.vehicle.position;
-    this.headlightL.intensity = hlIntensity;
-    this.headlightR.intensity = hlIntensity;
-    this.headlightL.position.set(vPos.x + Math.sin(vRot) * 3 - Math.cos(vRot) * 0.6, 1.5, vPos.z + Math.cos(vRot) * 3 + Math.sin(vRot) * 0.6);
-    this.headlightR.position.set(vPos.x + Math.sin(vRot) * 3 + Math.cos(vRot) * 0.6, 1.5, vPos.z + Math.cos(vRot) * 3 - Math.sin(vRot) * 0.6);
 
     // Drift scoring
     this.updateDrift(delta, input);
@@ -765,7 +766,7 @@ export class Game {
     this.effects.update(delta);
 
     // Speed trail update
-    this.updateSpeedTrail();
+    // Speed trail removed
 
     // Chromatic aberration on boost
     if (this.caPass) {
@@ -950,7 +951,7 @@ export class Game {
   // --- Collisions ---
   checkBuildingCollisions() {
     const pos = this.vehicle.position;
-    const r = 1.8;
+    const r = 2.5;
     for (const b of this.city.getNearbyBuildings(pos.x, pos.z)) {
       const cx = Math.max(b.minX, Math.min(pos.x, b.maxX));
       const cz = Math.max(b.minZ, Math.min(pos.z, b.maxZ));
@@ -958,16 +959,23 @@ export class Game {
       const dz = pos.z - cz;
       const dist = Math.sqrt(dx * dx + dz * dz);
       if (dist < r) {
-        const push = r - dist;
-        if (dist > 0.001) { pos.x += (dx / dist) * push; pos.z += (dz / dist) * push; }
-        else pos.x += push;
-        if (Math.abs(this.vehicle.speed) > 5) {
-          this.shakeIntensity = Math.min(Math.abs(this.vehicle.speed) * 0.02, 0.5);
+        // Hard push-out + bounce
+        const pushStr = (r - dist) + 2.0;
+        if (dist > 0.001) { pos.x += (dx / dist) * pushStr; pos.z += (dz / dist) * pushStr; }
+        else { pos.x += pushStr; }
+        // Bounce speed on first contact
+        if (this.crashFineCooldown <= 0) {
+          const bounceForce = Math.min(Math.abs(this.vehicle.speed) * 0.4, 20);
+          this.vehicle.speed = -Math.sign(this.vehicle.speed || 1) * bounceForce;
+          this.shakeIntensity = 0.3;
+          this.health -= 5;
           this.passengers.recordCrash();
-          this.effects.spawnDebris(this.vehicle.position, 0x998877);
           if (this.music.playCollisionThud) this.music.playCollisionThud(Math.min(Math.abs(this.vehicle.speed) / 40, 1));
+          this.crashFineCooldown = 0.5;
+          const flash = document.getElementById('screen-flash');
+          if (flash) { flash.style.background = 'rgba(255,50,50,0.25)'; flash.style.opacity = '1'; setTimeout(() => { flash.style.opacity = '0'; }, 150); }
+          if (this.health <= 0) { this.health = 0; this.gameOver(); return; }
         }
-        this.vehicle.speed *= 0.2;
       }
     }
     const citySize = GRID_SIZE * CELL_SIZE;
@@ -975,7 +983,7 @@ export class Game {
     pos.z = Math.max(2, Math.min(citySize - 2, pos.z));
   }
 
-  checkTrafficInteractions() {
+  checkTrafficInteractions(delta) {
     const vPos = this.vehicle.position;
     const vSpeed = Math.abs(this.vehicle.speed);
     const vR = 2;
@@ -986,29 +994,47 @@ export class Game {
       const dist = Math.sqrt(dx * dx + dz * dz);
 
       if (dist < vR + npc.radius) {
-        const push = (vR + npc.radius - dist) * 0.6;
-        if (dist > 0.001) { vPos.x += (dx / dist) * push; vPos.z += (dz / dist) * push; }
-        this.vehicle.speed *= 0.15;
-        this.shakeIntensity = 0.4;
-        this.passengers.recordCrash();
-        // Debris on collision
-        this.effects.spawnDebris(npc.position);
-        if (this.music.playCollisionThud) this.music.playCollisionThud(Math.min(vSpeed / 40, 1));
-        // Crash fine
-        if (this.crashFineCooldown <= 0 && vSpeed > 8) {
-          this.crashFineCooldown = 2;
-          this.score = Math.max(0, this.score - this.crashFineAmount);
-          this.fines += this.crashFineAmount;
-          this.showDialogue('crash');
-          this.showViolation();
-          this.music.playViolation();
-
-          // High-speed crash triggers police
-          if (vSpeed > 30 && !this.police.isActive()) {
-            this.police.activate(this.vehicle.position);
-            this.showDialogue('policeChase');
+        // Always push out hard — guarantee escape
+        const overlap = vR + npc.radius - dist;
+        const pushStr = overlap + 2.0;
+        if (dist > 0.001) {
+          vPos.x += (dx / dist) * pushStr;
+          vPos.z += (dz / dist) * pushStr;
+        } else {
+          vPos.x += pushStr;
+        }
+        // Also push the NPC away
+        if (dist > 0.001) {
+          npc.position.x -= (dx / dist) * overlap * 0.5;
+          npc.position.z -= (dz / dist) * overlap * 0.5;
+        }
+        // Bounce + effects only on first contact (cooldown-gated)
+        if (this.crashFineCooldown <= 0) {
+          const bounceForce = Math.min(vSpeed * 0.35, 18);
+          this.vehicle.speed = -Math.sign(this.vehicle.speed || 1) * bounceForce;
+          this.shakeIntensity = 0.3;
+          this.health -= 10;
+          this.passengers.recordCrash();
+          if (this.health <= 0) { this.health = 0; this.gameOver(); return; }
+          if (this.music.playCollisionThud) this.music.playCollisionThud(Math.min(vSpeed / 40, 1));
+          const flash = document.getElementById('screen-flash');
+          if (flash) { flash.style.background = 'rgba(255,50,50,0.25)'; flash.style.opacity = '1'; setTimeout(() => { flash.style.opacity = '0'; }, 150); }
+          if (vSpeed > 8) {
+            this.crashFineCooldown = 1.5;
+            this.score = Math.max(0, this.score - this.crashFineAmount);
+            this.fines += this.crashFineAmount;
+            this.showDialogue('crash');
+            this.showViolation();
+            this.music.playViolation();
+            if (vSpeed > 30 && !this.police.isActive()) {
+              this.police.activate(this.vehicle.position);
+              this.showDialogue('policeChase');
+            }
+          } else {
+            this.crashFineCooldown = 0.5;
           }
         }
+        // On subsequent overlap frames, just push — no speed change
       } else if (dist < GAME.nearMissDistance + npc.radius && vSpeed > 15) {
         if (!npc._nmCd || npc._nmCd <= 0) {
           npc._nmCd = 2;
@@ -1033,11 +1059,19 @@ export class Game {
       const dz = vPos.z - a.position.z;
       const dist = Math.sqrt(dx * dx + dz * dz);
       if (dist < vR + a.radius) {
-        const push = (vR + a.radius - dist) * 0.6;
-        if (dist > 0.001) { vPos.x += (dx / dist) * push; vPos.z += (dz / dist) * push; }
-        this.vehicle.speed *= 0.1;
-        this.shakeIntensity = 0.6;
-        this.passengers.recordCrash();
+        const pushStr = (vR + a.radius - dist) + 2.5;
+        if (dist > 0.001) { vPos.x += (dx / dist) * pushStr; vPos.z += (dz / dist) * pushStr; }
+        if (this.crashFineCooldown <= 0) {
+          const bounceForce = Math.min(Math.abs(this.vehicle.speed) * 0.5, 22);
+          this.vehicle.speed = -Math.sign(this.vehicle.speed || 1) * bounceForce;
+          this.shakeIntensity = 0.5;
+          this.health -= 8;
+          this.passengers.recordCrash();
+          this.crashFineCooldown = 0.5;
+          const flash = document.getElementById('screen-flash');
+          if (flash) { flash.style.background = 'rgba(255,50,50,0.25)'; flash.style.opacity = '1'; setTimeout(() => { flash.style.opacity = '0'; }, 150); }
+          if (this.health <= 0) { this.health = 0; this.gameOver(); return; }
+        }
       }
     }
   }
@@ -1337,6 +1371,10 @@ export class Game {
     const maxStars = this.deliveries * 3;
     this.ui.starsEarned.textContent = maxStars > 0 ? `${'★'.repeat(this.totalStars)}${'☆'.repeat(maxStars - this.totalStars)}` : '';
 
+    // Health bar
+    const hb = document.getElementById('health-bar');
+    if (hb) hb.style.width = `${Math.max(0, this.health)}%`;
+
     // Speedometer
     const kmh = this.vehicle.getSpeedKmh();
     this.ui.speedoValue.textContent = kmh;
@@ -1574,7 +1612,7 @@ export class Game {
     // Road center lines
     ctx.strokeStyle = 'rgba(255,255,255,.06)';
     ctx.lineWidth = 0.5;
-    for (let i = 0; i < GRID_SIZE; i += 3) {
+    for (let i = 0; i < GRID_SIZE; i += 2) {
       const p = i * CELL_SIZE * s + CELL_SIZE * s / 2;
       ctx.beginPath(); ctx.moveTo(p, 0); ctx.lineTo(p, H); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(0, p); ctx.lineTo(W, p); ctx.stroke();
@@ -1658,7 +1696,7 @@ export class Game {
     const rot = this.vehicle.rotation;
     ctx.save();
     ctx.translate(pos.x * s, pos.z * s);
-    ctx.rotate(-rot);
+    ctx.rotate(Math.PI - rot);
     ctx.fillStyle = '#ff4444';
     ctx.beginPath();
     ctx.moveTo(0, -8);
@@ -1726,7 +1764,7 @@ export class Game {
     // Rotate around player (player always faces up)
     ctx.save();
     ctx.translate(cx, cy);
-    ctx.rotate(pRot);
+    ctx.rotate(pRot + Math.PI);
 
     // Helper: world to minimap coords
     const wx = (worldX) => (worldX - pPos.x) * s;
@@ -1973,45 +2011,7 @@ export class Game {
   }
 
   // --- Speed Trail ---
-  updateSpeedTrail() {
-    const speed = Math.abs(this.vehicle.speed);
-    const pos = this.vehicle.position;
-    const rot = this.vehicle.rotation;
-
-    // Add new trail point at vehicle rear
-    const i = this.trailIndex % this.trailLength;
-    this.trailPositions[i * 3] = pos.x - Math.sin(rot) * 2.5;
-    this.trailPositions[i * 3 + 1] = 0.5;
-    this.trailPositions[i * 3 + 2] = pos.z - Math.cos(rot) * 2.5;
-    this.glowTrailPositions[i * 3] = this.trailPositions[i * 3];
-    this.glowTrailPositions[i * 3 + 1] = 0.5;
-    this.glowTrailPositions[i * 3 + 2] = this.trailPositions[i * 3 + 2];
-    this.trailIndex++;
-
-    // Visibility based on speed
-    const showTrail = speed > 15;
-    this.speedTrail.visible = showTrail;
-    this.glowTrail.visible = showTrail;
-
-    if (showTrail) {
-      const intensity = Math.min((speed - 15) / 30, 1);
-      this.speedTrail.material.opacity = 0.4 * intensity;
-      this.glowTrail.material.opacity = 0.2 * intensity;
-      this.glowTrail.material.size = 0.8 + intensity * 1.5;
-
-      // Color shifts with boost
-      if (this.vehicle.boosting) {
-        this.speedTrail.material.color.setHex(0xff6600);
-        this.glowTrail.material.color.setHex(0xff8800);
-      } else {
-        this.speedTrail.material.color.setHex(0x22d3ee);
-        this.glowTrail.material.color.setHex(0x4ade80);
-      }
-    }
-
-    this.speedTrail.geometry.attributes.position.needsUpdate = true;
-    this.glowTrail.geometry.attributes.position.needsUpdate = true;
-  }
+  // Speed trail removed — was the cyan/green line behind the vehicle
 
   // --- Pigeon Scatter ---
   updatePigeonScatter(delta) {
@@ -2401,19 +2401,34 @@ export class Game {
           const skinColors = [0xc68642, 0x8d5524, 0xf1c27d, 0xe0ac69, 0xffdbac];
           const clothColors = [0xdd3333, 0x3366cc, 0x22aa44, 0xcc6622, 0x9933cc, 0xcc2266, 0x2288aa];
 
+          const clothColor = clothColors[Math.floor(Math.random() * clothColors.length)];
+          const skinColor = skinColors[Math.floor(Math.random() * skinColors.length)];
+
+          // Torso
           const body = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.2, 0.25, 1, 6),
-            new THREE.MeshLambertMaterial({ color: clothColors[Math.floor(Math.random() * clothColors.length)] })
+            new THREE.CylinderGeometry(0.5, 0.45, 1.8, 8),
+            new THREE.MeshPhongMaterial({ color: clothColor })
           );
-          body.position.y = 0.8;
+          body.position.y = 1.8;
           g.add(body);
 
+          // Head
           const head = new THREE.Mesh(
-            new THREE.SphereGeometry(0.16, 6, 6),
-            new THREE.MeshLambertMaterial({ color: skinColors[Math.floor(Math.random() * skinColors.length)] })
+            new THREE.SphereGeometry(0.35, 8, 8),
+            new THREE.MeshPhongMaterial({ color: skinColor })
           );
-          head.position.y = 1.5;
+          head.position.y = 3.1;
           g.add(head);
+
+          // Legs
+          for (let leg = -1; leg <= 1; leg += 2) {
+            const legMesh = new THREE.Mesh(
+              new THREE.CylinderGeometry(0.15, 0.18, 1.0, 6),
+              new THREE.MeshPhongMaterial({ color: 0x333355 })
+            );
+            legMesh.position.set(leg * 0.2, 0.5, 0);
+            g.add(legMesh);
+          }
 
           g.position.set(
             cx + (Math.random() - 0.5) * 5,
@@ -2496,15 +2511,20 @@ export class Game {
         }
       }
 
-      // Collision with player — slow down if hitting pedestrians
+      // Collision with pedestrians — bounce off
       if (dist < 25 && vSpeed > 5) {
         for (const ped of crowd.meshes) {
           const pdx = vPos.x - ped.position.x;
           const pdz = vPos.z - ped.position.z;
           const pd = Math.sqrt(pdx * pdx + pdz * pdz);
-          if (pd < 1.5) {
-            this.vehicle.speed *= 0.7;
-            this.shakeIntensity = 0.1;
+          if (pd < 2.5 && this.crashFineCooldown <= 0) {
+            // Push player away
+            if (pd > 0.01) { vPos.x += (pdx / pd) * 2; vPos.z += (pdz / pd) * 2; }
+            const bounceForce = Math.min(vSpeed * 0.3, 12);
+            this.vehicle.speed = -Math.sign(this.vehicle.speed || 1) * bounceForce;
+            this.shakeIntensity = 0.2;
+            this.crashFineCooldown = 0.3;
+            break;
           }
         }
       }
@@ -2656,7 +2676,13 @@ export class Game {
 
   // --- Game Over ---
   gameOver() {
+    // Brief slow-mo before showing overlay
+    this.timeScale = 0.2;
+    setTimeout(() => { this.timeScale = 1; this._showGameOver(); }, 800);
     this.setState(STATE.GAMEOVER);
+  }
+
+  _showGameOver() {
     this.music.stop();
 
     // High score (solo only)

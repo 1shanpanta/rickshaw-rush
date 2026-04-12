@@ -1,4 +1,4 @@
-export const CELL_SIZE = 22;
+export const CELL_SIZE = 30;
 export const GRID_SIZE = 40;
 
 export const COLORS = {
@@ -22,15 +22,15 @@ export const COLORS = {
 };
 
 export const VEHICLE = {
-  maxSpeed: 44,
-  boostSpeed: 65,
-  acceleration: 34,
-  brakeForce: 55,
-  friction: 4.5,
-  turnSpeed: 3.0,
-  reverseMaxSpeed: 12,
-  boostDuration: 2.5,
-  boostCooldown: 4,
+  maxSpeed: 55,
+  boostSpeed: 80,
+  acceleration: 50,
+  brakeForce: 65,
+  friction: 3.5,
+  turnSpeed: 2.8,
+  reverseMaxSpeed: 15,
+  boostDuration: 3.0,
+  boostCooldown: 3,
 };
 
 export const GAME = {

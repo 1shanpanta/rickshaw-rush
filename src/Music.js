@@ -71,9 +71,10 @@ export class MusicSystem {
     this.loadSample('siren', '/sounds/siren.mp3');
     this.loadSample('gong', '/sounds/gong.ogg');
     this.loadSample('explosion', '/sounds/explosion.ogg');
+    this.loadSample('racing-music', '/sounds/racing-music.ogg');
 
     this.startEngine();
-    this.startMusic();
+    this.startMusicTrack();
     this.playing = true;
     this.startAmbient();
   }
@@ -147,6 +148,25 @@ export class MusicSystem {
   }
 
   // --- Music ---
+  // Play real music track if loaded, fall back to synthesis
+  startMusicTrack() {
+    this._waitForSample('racing-music', () => {
+      this._musicSample = this.playSample('racing-music', 0.45, true);
+    });
+    // Also start synth as fallback (will be quiet if sample plays)
+    this.startMusic();
+  }
+
+  _waitForSample(name, cb) {
+    if (this.samples[name]) { cb(); return; }
+    let attempts = 0;
+    const check = setInterval(() => {
+      attempts++;
+      if (this.samples[name]) { clearInterval(check); cb(); }
+      if (attempts > 50) clearInterval(check); // give up after 5s
+    }, 100);
+  }
+
   startMusic() {
     const ctx = this.ctx;
     const beatDuration = 60 / MUSIC.bpm;
@@ -504,7 +524,7 @@ export class MusicSystem {
     if (!this.ctx) return;
     // Use real audio sample if loaded, fall back to synthesis
     if (this.samples.horn) {
-      this.playSample('horn', 0.7);
+      this.playSample('horn', 1.0);
       return;
     }
     // Synthesized Nepali rickshaw horn — loud two-tone "pee-paw"
@@ -517,8 +537,8 @@ export class MusicSystem {
     osc1.frequency.setValueAtTime(620, t);
     osc1.frequency.linearRampToValueAtTime(580, t + 0.15);
     const g1 = ctx.createGain();
-    g1.gain.setValueAtTime(0.14, t);
-    g1.gain.setValueAtTime(0.14, t + 0.1);
+    g1.gain.setValueAtTime(0.25, t);
+    g1.gain.setValueAtTime(0.25, t + 0.1);
     g1.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
     osc1.connect(g1);
     g1.connect(this.masterGain);
@@ -532,8 +552,8 @@ export class MusicSystem {
     osc2.frequency.setValueAtTime(440, t + 0.18);
     osc2.frequency.linearRampToValueAtTime(410, t + 0.38);
     const g2 = ctx.createGain();
-    g2.gain.setValueAtTime(0.16, t + 0.18);
-    g2.gain.setValueAtTime(0.16, t + 0.3);
+    g2.gain.setValueAtTime(0.28, t + 0.18);
+    g2.gain.setValueAtTime(0.28, t + 0.3);
     g2.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
     osc2.connect(g2);
     g2.connect(this.masterGain);

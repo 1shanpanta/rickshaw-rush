@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { CELL_SIZE, GRID_SIZE, GAME, FARE, RATING } from './constants.js';
+import { CELL_SIZE, FARE, RATING } from './constants.js';
 
 const PASSENGER_NAMES = [
   'Sita ji', 'Ram dai', 'Gita didi', 'Hari bhai',

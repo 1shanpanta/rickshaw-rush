@@ -71,10 +71,10 @@ caPass.uniforms.amount.value = 0.0;
 composer.addPass(caPass);
 
 // --- Lighting ---
-scene.add(new THREE.AmbientLight(0xffffff, 0.65));
-scene.add(new THREE.HemisphereLight(0x87ceeb, 0x5a8c4b, 0.4));
+scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+scene.add(new THREE.HemisphereLight(0x87ceeb, 0x5a8c4b, 0.6));
 
-const sun = new THREE.DirectionalLight(0xfff4e0, 0.9);
+const sun = new THREE.DirectionalLight(0xfff4e0, 1.3);
 sun.position.set(150, 120, 100);
 sun.castShadow = true;
 sun.shadow.mapSize.set(1024, 1024);
@@ -166,7 +166,7 @@ function resumeGame() {
 $('btn-resume')?.addEventListener('click', resumeGame);
 $('btn-exit-menu')?.addEventListener('click', () => {
   $('pause-menu')?.classList.remove('active');
-  game.gameOver();
+  game.returnToMenu();
 });
 
 // --- Music toggle ---

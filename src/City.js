@@ -5,6 +5,7 @@ import { CELL_SIZE, GRID_SIZE, COLORS, MAPS } from './constants.js';
 export class City {
   constructor(scene, mapId = 'kathmandu') {
     this.scene = scene;
+    this.meshes = [];
     this.grid = [];
     this.buildingBounds = [];
     this.roadPositions = [];
@@ -22,6 +23,28 @@ export class City {
     this.buildShopSigns();
     this.buildMountains();
     this.buildPigeonGroups();
+  }
+
+  // Tracked add — use this instead of scene.add for city meshes
+  _add(obj) {
+    this.meshes.push(obj);
+    this.scene.add(obj);
+  }
+
+  destroy() {
+    for (const m of this.meshes) {
+      this.scene.remove(m);
+      if (m.geometry) m.geometry.dispose();
+      if (m.material) {
+        if (Array.isArray(m.material)) m.material.forEach(mat => mat.dispose());
+        else m.material.dispose();
+      }
+    }
+    this.meshes = [];
+    this.buildingBounds = [];
+    this.roadPositions = [];
+    this.speedBumps = [];
+    this._spatialGrid = null;
   }
 
   // Terrain height at any world position — gentle rolling hills
@@ -75,7 +98,7 @@ export class City {
     for (let x = 0; x < GRID_SIZE; x++) {
       this.grid[x] = [];
       for (let z = 0; z < GRID_SIZE; z++) {
-        this.grid[x][z] = (x % 3 === 0 || z % 3 === 0) ? 'road' : 'building';
+        this.grid[x][z] = (x % 2 === 0 || z % 2 === 0) ? 'road' : 'building';
       }
     }
     const tc = Math.floor(GRID_SIZE / 2);
@@ -116,7 +139,7 @@ export class City {
     const ground = new THREE.Mesh(geo, mat);
     ground.position.set(size / 2, 0, size / 2);
     ground.receiveShadow = true;
-    this.scene.add(ground);
+    this._add(ground);
   }
 
   buildRoads() {
@@ -138,8 +161,8 @@ export class City {
         roadGeos.push(rg);
 
         // Dashed center line on straight road segments
-        const isHorizRoad = x % 3 === 0 && z % 3 !== 0;
-        const isVertRoad = z % 3 === 0 && x % 3 !== 0;
+        const isHorizRoad = x % 2 === 0 && z % 2 !== 0;
+        const isVertRoad = z % 2 === 0 && x % 2 !== 0;
         if (isHorizRoad || isVertRoad) {
           for (let d = -3; d <= 3; d += 3) {
             const lg = new THREE.PlaneGeometry(isVertRoad ? 2.5 : 0.15, isVertRoad ? 0.15 : 2.5);
@@ -161,7 +184,7 @@ export class City {
         new THREE.MeshLambertMaterial({ color: COLORS.road })
       );
       mergedRoad.receiveShadow = true;
-      this.scene.add(mergedRoad);
+      this._add(mergedRoad);
     }
 
     // Merge all center lines into one mesh
@@ -170,7 +193,7 @@ export class City {
         mergeGeometries(lineGeos),
         new THREE.MeshBasicMaterial({ color: 0x555555 })
       );
-      this.scene.add(mergedLines);
+      this._add(mergedLines);
     }
   }
 
@@ -190,7 +213,7 @@ export class City {
         const sidewalk = new THREE.Mesh(new THREE.PlaneGeometry(n.w, n.d), mat);
         sidewalk.rotation.x = -Math.PI / 2;
         sidewalk.position.set(px + n.ox, 0.06, pz + n.oz);
-        this.scene.add(sidewalk);
+        this._add(sidewalk);
       }
     }
   }
@@ -223,7 +246,7 @@ export class City {
     mesh.position.set(px, terrainY + height / 2, pz);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
-    this.scene.add(mesh);
+    this._add(mesh);
 
     // Roof edge
     const edgeColor = new THREE.Color(color).multiplyScalar(0.82);
@@ -232,7 +255,7 @@ export class City {
       new THREE.MeshLambertMaterial({ color: edgeColor })
     );
     edge.position.set(px, terrainY + height + 0.2, pz);
-    this.scene.add(edge);
+    this._add(edge);
 
     // Window grid
     if (height > 8) {
@@ -245,7 +268,7 @@ export class City {
         for (let w = 0; w < 3; w++) {
           const wMesh = new THREE.Mesh(new THREE.PlaneGeometry(width * 0.18, 1.3), winMat);
           wMesh.position.set(px - width * 0.28 + w * width * 0.28, wy, pz + depth / 2 + 0.01);
-          this.scene.add(wMesh);
+          this._add(wMesh);
         }
       }
     }
@@ -257,14 +280,14 @@ export class City {
       const balcony = new THREE.Mesh(balconyGeo, balconyMat);
       const bFloor = 2 + Math.floor(rng() * 3);
       balcony.position.set(px, bFloor * 3.5, pz + depth / 2 + 0.6);
-      this.scene.add(balcony);
+      this._add(balcony);
       // Railing
       const railing = new THREE.Mesh(
         new THREE.BoxGeometry(width * 0.6, 0.5, 0.05),
         new THREE.MeshLambertMaterial({ color: 0x666666 })
       );
       railing.position.set(px, bFloor * 3.5 + 0.35, pz + depth / 2 + 1.15);
-      this.scene.add(railing);
+      this._add(railing);
     }
 
     // Rooftop water tank (very Kathmandu!)
@@ -279,14 +302,14 @@ export class City {
         height + 1,
         pz + (rng() - 0.5) * depth * 0.5
       );
-      this.scene.add(tank);
+      this._add(tank);
 
       // Tank stand
       const standMat = new THREE.MeshLambertMaterial({ color: 0x555555 });
       for (const [sx, sz] of [[-0.5, -0.5], [0.5, -0.5], [-0.5, 0.5], [0.5, 0.5]]) {
         const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.6, 3), standMat);
         leg.position.set(tank.position.x + sx * 0.4, height + 0.3, tank.position.z + sz * 0.4);
-        this.scene.add(leg);
+        this._add(leg);
       }
     }
 
@@ -298,7 +321,7 @@ export class City {
       );
       const acFloor = 1 + Math.floor(rng() * Math.min(3, Math.floor(height / 4)));
       ac.position.set(px + width / 2 + 0.15, acFloor * 3.5, pz + (rng() - 0.5) * depth * 0.6);
-      this.scene.add(ac);
+      this._add(ac);
     }
 
     // Satellite dish on roof
@@ -313,7 +336,7 @@ export class City {
         pz + (rng() - 0.5) * depth * 0.4
       );
       dish.rotation.x = -0.5;
-      this.scene.add(dish);
+      this._add(dish);
 
       // Dish pole
       const pole = new THREE.Mesh(
@@ -321,7 +344,7 @@ export class City {
         new THREE.MeshLambertMaterial({ color: 0x888888 })
       );
       pole.position.set(dish.position.x, height + 0.4, dish.position.z);
-      this.scene.add(pole);
+      this._add(pole);
     }
 
     // Clothesline (random, between windows)
@@ -332,7 +355,7 @@ export class City {
         new THREE.Vector3(px - width * 0.35, lineY, pz + depth / 2 + 0.3),
         new THREE.Vector3(px + width * 0.35, lineY, pz + depth / 2 + 0.3),
       ]);
-      this.scene.add(new THREE.Line(lineGeo, lineMat));
+      this._add(new THREE.Line(lineGeo, lineMat));
 
       // Hanging clothes (colored rectangles)
       const clothColors = [0xff4444, 0x4444ff, 0x44ff44, 0xffff44, 0xff44ff];
@@ -349,7 +372,7 @@ export class City {
           lineY - 0.35,
           pz + depth / 2 + 0.31
         );
-        this.scene.add(cloth);
+        this._add(cloth);
       }
     }
 
@@ -376,7 +399,7 @@ export class City {
       );
       base.position.set(cx, tier * h + h / 2, cz);
       base.castShadow = true;
-      this.scene.add(base);
+      this._add(base);
     }
 
     // Dome
@@ -386,7 +409,7 @@ export class City {
     );
     dome.position.set(cx, 4.5, cz);
     dome.castShadow = true;
-    this.scene.add(dome);
+    this._add(dome);
 
     // Harmika
     const harmika = new THREE.Mesh(
@@ -394,7 +417,7 @@ export class City {
       new THREE.MeshLambertMaterial({ color: COLORS.temple.gold })
     );
     harmika.position.set(cx, 16, cz);
-    this.scene.add(harmika);
+    this._add(harmika);
 
     // Eyes (all 4 sides)
     const eyeMat = new THREE.MeshBasicMaterial({ color: 0x000080 });
@@ -403,7 +426,7 @@ export class City {
       const eye = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 2), eyeMat);
       eye.position.set(cx + Math.sin(angle) * 2.51, 16.5, cz + Math.cos(angle) * 2.51);
       eye.rotation.y = angle;
-      this.scene.add(eye);
+      this._add(eye);
     }
 
     // Spire rings
@@ -414,7 +437,7 @@ export class City {
         new THREE.MeshLambertMaterial({ color: COLORS.temple.gold })
       );
       ring.position.set(cx, 19 + i * 0.65, cz);
-      this.scene.add(ring);
+      this._add(ring);
     }
 
     // Pinnacle
@@ -423,7 +446,7 @@ export class City {
       new THREE.MeshLambertMaterial({ color: COLORS.temple.gold })
     );
     pin.position.set(cx, 28.5, cz);
-    this.scene.add(pin);
+    this._add(pin);
 
     // Butter lamps around base
     const lampMat = new THREE.MeshBasicMaterial({ color: 0xffaa33 });
@@ -431,7 +454,7 @@ export class City {
       const a = (i / 12) * Math.PI * 2;
       const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.2, 4, 4), lampMat);
       lamp.position.set(cx + Math.cos(a) * 15, 0.5, cz + Math.sin(a) * 15);
-      this.scene.add(lamp);
+      this._add(lamp);
     }
 
     this.buildingBounds.push({
@@ -455,8 +478,8 @@ export class City {
     }
 
     // Streetlights
-    for (let x = 0; x < GRID_SIZE; x += 3) {
-      for (let z = 1; z < GRID_SIZE; z += 3) {
+    for (let x = 0; x < GRID_SIZE; x += 2) {
+      for (let z = 1; z < GRID_SIZE; z += 2) {
         if (rng() > 0.5) continue;
         const px = x * CELL_SIZE + CELL_SIZE / 2 + CELL_SIZE * 0.42;
         const pz = z * CELL_SIZE + CELL_SIZE / 2;
@@ -484,7 +507,7 @@ export class City {
     );
     trunk.position.set(x, h / 2, z);
     trunk.castShadow = true;
-    this.scene.add(trunk);
+    this._add(trunk);
 
     const r = 1.5 + rng() * 1.5;
     const canopy = new THREE.Mesh(
@@ -493,7 +516,7 @@ export class City {
     );
     canopy.position.set(x, h + r * 0.5, z);
     canopy.castShadow = true;
-    this.scene.add(canopy);
+    this._add(canopy);
   }
 
   createStreetlight(x, z) {
@@ -502,14 +525,14 @@ export class City {
       new THREE.MeshLambertMaterial({ color: 0x555555 })
     );
     pole.position.set(x, 2.5, z);
-    this.scene.add(pole);
+    this._add(pole);
 
     const lamp = new THREE.Mesh(
       new THREE.SphereGeometry(0.25, 6, 6),
       new THREE.MeshBasicMaterial({ color: 0xffee88 })
     );
     lamp.position.set(x, 5.2, z);
-    this.scene.add(lamp);
+    this._add(lamp);
   }
 
   createTeaStall(x, z, rng) {
@@ -520,7 +543,7 @@ export class City {
       new THREE.MeshLambertMaterial({ color: 0x8b6914 })
     );
     base.position.set(x, 0.75, z);
-    this.scene.add(base);
+    this._add(base);
 
     // Counter top
     const counter = new THREE.Mesh(
@@ -528,7 +551,7 @@ export class City {
       new THREE.MeshLambertMaterial({ color: 0xdeb887 })
     );
     counter.position.set(x, 1.54, z);
-    this.scene.add(counter);
+    this._add(counter);
 
     // Awning
     const awning = new THREE.Mesh(
@@ -538,14 +561,14 @@ export class City {
       })
     );
     awning.position.set(x, 2.5, z);
-    this.scene.add(awning);
+    this._add(awning);
 
     // Poles
     const poleMat = new THREE.MeshLambertMaterial({ color: 0x666666 });
     for (const [px, pz] of [[-w / 2, 0.8], [w / 2, 0.8]]) {
       const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.2, 4), poleMat);
       pole.position.set(x + px, 1.9, z + pz);
-      this.scene.add(pole);
+      this._add(pole);
     }
   }
 
@@ -573,7 +596,7 @@ export class City {
   }
 
   createFlagString(from, to, rng) {
-    this.scene.add(new THREE.Line(
+    this._add(new THREE.Line(
       new THREE.BufferGeometry().setFromPoints([from, to]),
       new THREE.LineBasicMaterial({ color: 0x777777 })
     ));
@@ -594,15 +617,15 @@ export class City {
       flag.position.copy(pos);
       flag.position.y -= 0.4;
       flag.rotation.y = rng() * 0.4;
-      this.scene.add(flag);
+      this._add(flag);
     }
   }
 
   buildSpeedBumps() {
     const rng = this.seededRandom(222);
 
-    for (let x = 3; x < GRID_SIZE - 1; x += 3) {
-      for (let z = 3; z < GRID_SIZE - 1; z += 3) {
+    for (let x = 2; x < GRID_SIZE - 1; x += 4) {
+      for (let z = 2; z < GRID_SIZE - 1; z += 4) {
         if (rng() > 0.35) continue;
         if (!this.isRoad(x, z)) continue;
 
@@ -615,7 +638,7 @@ export class City {
           new THREE.MeshLambertMaterial({ color: 0xddcc00 })
         );
         bump.position.set(px, 0.08, pz + CELL_SIZE * 0.3);
-        this.scene.add(bump);
+        this._add(bump);
 
         // Striping
         for (let s = 0; s < 5; s++) {
@@ -624,7 +647,7 @@ export class City {
             new THREE.MeshBasicMaterial({ color: 0x333333 })
           );
           stripe.position.set(px - 4 + s * 2, 0.09, pz + CELL_SIZE * 0.3);
-          this.scene.add(stripe);
+          this._add(stripe);
         }
 
         this.speedBumps.push(new THREE.Vector3(px, 0, pz + CELL_SIZE * 0.3));
@@ -722,7 +745,7 @@ export class City {
         );
         sign.position.set(signX, 3.5 + rng() * 2, signZ);
         sign.rotation.y = rotY;
-        this.scene.add(sign);
+        this._add(sign);
 
         // Border
         const border = new THREE.Mesh(
@@ -733,7 +756,7 @@ export class City {
         border.rotation.y = rotY;
         const norm = new THREE.Vector3(0, 0, -0.02).applyAxisAngle(new THREE.Vector3(0, 1, 0), rotY);
         border.position.add(norm);
-        this.scene.add(border);
+        this._add(border);
       }
     }
   }
@@ -771,7 +794,7 @@ export class City {
       mesh.position.set(peak.x, peak.h / 2, peak.z);
       mesh.castShadow = false;
       mesh.receiveShadow = false;
-      this.scene.add(mesh);
+      this._add(mesh);
 
       // Snow cap on tall peaks
       if (peak.h > 80) {
@@ -783,7 +806,7 @@ export class City {
         snowMesh.position.set(peak.x, peak.h - snowH / 2, peak.z);
         snowMesh.castShadow = false;
         snowMesh.receiveShadow = false;
-        this.scene.add(snowMesh);
+        this._add(snowMesh);
       }
     }
   }
@@ -796,7 +819,7 @@ export class City {
       for (let z = 0; z < GRID_SIZE; z++) {
         if (this.grid[x][z] !== 'road') continue;
         // Only at intersections where both x%3===0 and z%3===0
-        if (x % 3 !== 0 || z % 3 !== 0) continue;
+        if (x % 2 !== 0 || z % 2 !== 0) continue;
         // ~5% of qualifying intersections
         if (rng() > 0.05) continue;
 
@@ -832,7 +855,7 @@ export class City {
           );
           pigeonGroup.rotation.y = rng() * Math.PI * 2;
 
-          this.scene.add(pigeonGroup);
+          this._add(pigeonGroup);
           meshes.push(pigeonGroup);
         }
 

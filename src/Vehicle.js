@@ -40,59 +40,59 @@ export class Vehicle {
 
     // Body
     const bodyMat = new THREE.MeshLambertMaterial({ color: COLORS.rickshaw.body });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.8, 4), bodyMat);
+    const body = new THREE.Mesh(new THREE.BoxGeometry(3.2, 2.4, 5.5), bodyMat);
     body.position.y = 1.3;
     body.castShadow = true;
     this.mesh.add(body);
 
     // Cabin
     const cabin = new THREE.Mesh(
-      new THREE.BoxGeometry(2.6, 1.6, 2.2),
+      new THREE.BoxGeometry(3.4, 2.2, 3),
       bodyMat
     );
-    cabin.position.set(0, 1.4, -0.6);
+    cabin.position.set(0, 1.8, -0.8);
     this.mesh.add(cabin);
 
     // Roof
     const roof = new THREE.Mesh(
-      new THREE.BoxGeometry(2.8, 0.2, 4.4),
+      new THREE.BoxGeometry(3.6, 0.25, 6),
       new THREE.MeshLambertMaterial({ color: COLORS.rickshaw.roof })
     );
-    roof.position.y = 2.5;
+    roof.position.y = 3.2;
     this.mesh.add(roof);
 
     // Front nose
     const nose = new THREE.Mesh(
-      new THREE.BoxGeometry(1.6, 1.2, 1.2),
+      new THREE.BoxGeometry(2.2, 1.6, 1.6),
       new THREE.MeshLambertMaterial({ color: 0x333333 })
     );
-    nose.position.set(0, 1, 2.2);
+    nose.position.set(0, 1.3, 3);
     this.mesh.add(nose);
 
     // Windshield
     const ws = new THREE.Mesh(
-      new THREE.PlaneGeometry(2, 1.2),
+      new THREE.PlaneGeometry(2.8, 1.6),
       new THREE.MeshLambertMaterial({ color: 0x88ccff, transparent: true, opacity: 0.4 })
     );
-    ws.position.set(0, 2, 1.8);
+    ws.position.set(0, 2.6, 2.4);
     ws.rotation.x = -0.15;
     this.mesh.add(ws);
 
     // Gold stripe
     const stripe = new THREE.Mesh(
-      new THREE.BoxGeometry(2.42, 0.15, 4.02),
+      new THREE.BoxGeometry(3.22, 0.18, 5.52),
       new THREE.MeshBasicMaterial({ color: COLORS.rickshaw.accent })
     );
-    stripe.position.y = 0.6;
+    stripe.position.y = 0.8;
     this.mesh.add(stripe);
 
     // Headlights (visual + actual SpotLights)
     const hMat = new THREE.MeshBasicMaterial({ color: 0xffffaa });
     this.headlightTargets = [];
     this.headlights = [];
-    for (const side of [-0.65, 0.65]) {
-      const hl = new THREE.Mesh(new THREE.SphereGeometry(0.18, 6, 6), hMat);
-      hl.position.set(side, 1.2, 2.81);
+    for (const side of [-0.9, 0.9]) {
+      const hl = new THREE.Mesh(new THREE.SphereGeometry(0.25, 6, 6), hMat);
+      hl.position.set(side, 1.5, 3.6);
       this.mesh.add(hl);
 
       // Light target (point ahead of the vehicle)
@@ -101,7 +101,7 @@ export class Vehicle {
       this.mesh.add(target);
 
       const spot = new THREE.SpotLight(0xfff8e0, 5, 60, Math.PI / 4.5, 0.4, 1.2);
-      spot.position.set(side, 1.3, 2.9);
+      spot.position.set(side, 1.6, 3.7);
       spot.target = target;
       spot.castShadow = false;
       this.mesh.add(spot);
@@ -138,25 +138,25 @@ export class Vehicle {
       opacity: 0.6,
       blending: THREE.AdditiveBlending,
     });
-    for (const side of [-0.65, 0.65]) {
-      const glow = new THREE.Mesh(new THREE.SphereGeometry(0.3, 6, 6), glowMat);
-      glow.position.set(side, 1.2, 2.85);
+    for (const side of [-0.9, 0.9]) {
+      const glow = new THREE.Mesh(new THREE.SphereGeometry(0.4, 6, 6), glowMat);
+      glow.position.set(side, 1.5, 3.65);
       this.mesh.add(glow);
       this.headlightGlows.push(glow);
     }
 
     // Tail lights
     const tMat = new THREE.MeshBasicMaterial({ color: 0xff2222 });
-    for (const side of [-1, 1]) {
-      const tl = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.2, 0.05), tMat);
-      tl.position.set(side, 1, -2.01);
+    for (const side of [-1.3, 1.3]) {
+      const tl = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.3, 0.05), tMat);
+      tl.position.set(side, 1.3, -2.8);
       this.mesh.add(tl);
     }
 
     // Wheels
-    const wGeo = new THREE.CylinderGeometry(0.45, 0.45, 0.35, 10);
+    const wGeo = new THREE.CylinderGeometry(0.6, 0.6, 0.45, 10);
     const wMat = new THREE.MeshLambertMaterial({ color: COLORS.rickshaw.wheel });
-    const hubGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.36, 6);
+    const hubGeo = new THREE.CylinderGeometry(0.28, 0.28, 0.46, 6);
     const hubMat = new THREE.MeshLambertMaterial({ color: 0x666666 });
 
     const makeWheel = (x, z) => {
@@ -165,14 +165,14 @@ export class Vehicle {
       w.rotation.z = Math.PI / 2;
       g.add(w);
       g.add(new THREE.Mesh(hubGeo, hubMat).rotateZ(Math.PI / 2));
-      g.position.set(x, 0.45, z);
+      g.position.set(x, 0.6, z);
       this.mesh.add(g);
       this.wheelMeshes.push(g);
     };
 
-    makeWheel(0, 2);
-    makeWheel(-1.3, -1.2);
-    makeWheel(1.3, -1.2);
+    makeWheel(0, 2.8);
+    makeWheel(-1.7, -1.6);
+    makeWheel(1.7, -1.6);
 
     // Boost flame (hidden by default) -- big and dramatic
     this.boostFlame = new THREE.Group();
