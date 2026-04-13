@@ -4,10 +4,8 @@ import { removeAndDispose } from './utils.js';
 export class Projectiles {
   constructor(scene) {
     this.scene = scene;
-    this.balloons = []; // keeping array name for compatibility with Game.js refs
+    this.balloons = [];
     this.splashes = [];
-    this.ammo = 10;
-    this.maxAmmo = 10;
   }
 
   fire(position, rotation, speed) {
@@ -233,10 +231,6 @@ export class Projectiles {
     this.splashes.push({ ring, droplets, life: 0.5, maxLife: 0.5 });
   }
 
-  refillAmmo(amount) {
-    this.ammo = Math.min(this.maxAmmo, this.ammo + (amount || this.maxAmmo));
-  }
-
   reset() {
     for (const b of this.balloons) removeAndDispose(this.scene, b.mesh);
     for (const sp of this.splashes) {
@@ -245,6 +239,5 @@ export class Projectiles {
     }
     this.balloons = [];
     this.splashes = [];
-    this.ammo = this.maxAmmo;
   }
 }

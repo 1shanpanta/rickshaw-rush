@@ -442,9 +442,6 @@ const menuAnimateInterval = setInterval(() => {
       cityCenter + Math.cos(menuAngle) * radius
     );
     camera.lookAt(cityCenter, 5, cityCenter);
-  } else {
-    // Once game starts, we don't need this anymore for now
-    // The game's updateCamera takes over
   }
 }, 16);
 

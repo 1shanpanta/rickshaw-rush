@@ -60,8 +60,6 @@ export class MusicSystem {
     this.loadSample('horn', '/sounds/horn.mp3');
     this.loadSample('ambiance', '/sounds/ambiance.mp3');
     this.loadSample('crash', '/sounds/crash.mp3');
-    this.loadSample('pickup', '/sounds/pickup.ogg');
-    this.loadSample('delivery', '/sounds/delivery.ogg');
     this.loadSample('collision', '/sounds/collision.ogg');
     this.loadSample('metal-crash', '/sounds/metal-crash.ogg');
     this.loadSample('nearmiss', '/sounds/nearmiss.wav');
@@ -575,33 +573,6 @@ export class MusicSystem {
     this._autoClean(sub, gs);
   }
 
-  playDelivery() {
-    if (!this.ctx) return;
-    if (this.samples.delivery) { this.playSample('delivery', 0.7); return; }
-    const ctx = this.ctx;
-    const t = ctx.currentTime;
-
-    // Ascending pentatonic arpeggio
-    const notes = [
-      MUSIC.scale[0], MUSIC.scale[1], MUSIC.scale[3],
-      MUSIC.scale[4], MUSIC.scale[5], MUSIC.scale[5] * 1.5,
-    ];
-    notes.forEach((freq, i) => {
-      const osc = ctx.createOscillator();
-      const g = ctx.createGain();
-      osc.connect(g);
-      g.connect(this.masterGain);
-      g.connect(this.reverbGain);
-      osc.type = 'sine';
-      osc.frequency.value = freq;
-      g.gain.setValueAtTime(0.045, t + i * 0.07);
-      g.gain.exponentialRampToValueAtTime(0.001, t + i * 0.07 + 0.3);
-      osc.start(t + i * 0.07);
-      osc.stop(t + i * 0.07 + 0.35);
-      this._autoClean(osc, g);
-    });
-  }
-
   playViolation() {
     if (!this.ctx) return;
     const ctx = this.ctx;
@@ -617,25 +588,6 @@ export class MusicSystem {
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
     osc.start(t);
     osc.stop(t + 0.3);
-    this._autoClean(osc, g);
-  }
-
-  playPickup() {
-    if (!this.ctx) return;
-    if (this.samples.pickup) { this.playSample('pickup', 0.6); return; }
-    const ctx = this.ctx;
-    const t = ctx.currentTime;
-    const osc = ctx.createOscillator();
-    const g = ctx.createGain();
-    osc.connect(g);
-    g.connect(this.masterGain);
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(440, t);
-    osc.frequency.setValueAtTime(660, t + 0.08);
-    g.gain.setValueAtTime(0.045, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
-    osc.start(t);
-    osc.stop(t + 0.22);
     this._autoClean(osc, g);
   }
 

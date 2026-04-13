@@ -96,24 +96,6 @@ export class Game {
     // Nepali dialogues
     this.dialogueTimer = 0;
     this.dialogues = {
-      pickup: [
-        'Namaste dai! Thamel jaanu paryo!',
-        'Chhito chhito! Late bhaisakyo!',
-        'Dai, meter chalaunos hai!',
-        'Bato hernu hai dai!',
-        'Au au kta ho! Chal chal!',
-        'Sabai jana au, jam!',
-        'Chiya khana Ratnapark jaaam!',
-        'Dai ekchhin! Ma aauchu!',
-      ],
-      delivery: [
-        'Dhanyabaad dai!',
-        'Ramro chalaunubhayo!',
-        'Paisa rakhnus!',
-        'Bahini lai pani bhanchu!',
-        'Aaba yo bato ma aaunuhos!',
-        'Ekdam ramro sewa!',
-      ],
       crash: [
         'Ke garnu bhayo dai!?',
         'Bato herna siknus!',
@@ -217,8 +199,6 @@ export class Game {
       levelUp: document.getElementById('level-up'),
       starPopup: document.getElementById('star-popup'),
       rainOverlay: document.getElementById('rain-overlay'),
-      ammoWrap: document.getElementById('ammo-wrap'),
-      ammoDots: document.getElementById('ammo-dots'),
       crosshair: document.getElementById('crosshair'),
       slowmoVignette: document.getElementById('slowmo-vignette'),
       photoModeEl: document.getElementById('photo-mode'),
@@ -347,7 +327,6 @@ export class Game {
     this.ui.minimap.style.display = 'none';
     this.ui.speedo.style.display = 'none';
     this.ui.boostWrap.style.display = 'none';
-    this.ui.ammoWrap.style.display = 'none';
     this.ui.policeWarning?.classList.remove('active');
     this.ui.powercutOverlay?.classList.remove('active');
     const hudArrow = document.getElementById('hud-arrow');
@@ -366,31 +345,21 @@ export class Game {
   // --- Start / Reset ---
   handleStart() {
     if (this.state !== STATE.MENU && this.state !== STATE.GAMEOVER) return;
-    console.log('[rickshaw] handleStart called, state:', this.state, 'map:', this.selectedMap);
 
-    try {
     this.setState(STATE.PLAYING);
 
     // Apply map config to scene atmosphere
-    try {
-      const mapCfg = MAPS[this.selectedMap] || MAPS.kathmandu;
-      console.log('[rickshaw] Starting game with map:', this.selectedMap);
-      this.scene.background.set(mapCfg.skyColor);
-      if (this.scene.fog) {
-        this.scene.fog.color.set(mapCfg.fogColor);
-        this.scene.fog.density = mapCfg.fogDensity;
-      }
-      // Update sun intensity per map
-      if (this.sunLight) {
-        this.sunLight.intensity = mapCfg.sunIntensity;
-      }
-      // Update terrain height calculations
-      this.city.mapConfig = mapCfg;
-      this._currentMap = this.selectedMap;
-      console.log('[rickshaw] Map config applied:', mapCfg.name);
-    } catch (e) {
-      console.error('[rickshaw] Failed to apply map config:', e);
+    const mapCfg = MAPS[this.selectedMap] || MAPS.kathmandu;
+    this.scene.background.set(mapCfg.skyColor);
+    if (this.scene.fog) {
+      this.scene.fog.color.set(mapCfg.fogColor);
+      this.scene.fog.density = mapCfg.fogDensity;
     }
+    if (this.sunLight) {
+      this.sunLight.intensity = mapCfg.sunIntensity;
+    }
+    this.city.mapConfig = mapCfg;
+    this._currentMap = this.selectedMap;
 
     this.score = 0;
     this.health = 100;
@@ -471,7 +440,6 @@ export class Game {
     this.ui.minimap.style.display = 'block';
     this.ui.speedo.style.display = 'block';
     this.ui.boostWrap.style.display = 'block';
-    this.ui.ammoWrap.style.display = 'block';
     const healthWrap = document.getElementById('health-bar-wrap');
     if (healthWrap) healthWrap.style.display = 'block';
     this.projectiles.reset();
@@ -501,10 +469,6 @@ export class Game {
     this.music.init();
     this.music.resume();
     this.police.music = this.music;
-    console.log('[rickshaw] Game started successfully');
-    } catch (e) {
-      console.error('[rickshaw] handleStart FAILED:', e);
-    }
   }
 
   // --- Slow-motion ---
@@ -533,7 +497,6 @@ export class Game {
       this.ui.speedo.style.display = 'none';
       this.ui.boostWrap.style.display = 'none';
       this.ui.minimap.style.display = 'none';
-      this.ui.ammoWrap.style.display = 'none';
       this.ui.controlsHint.style.display = 'none';
       this.photoOrbitAngle = this.vehicle.rotation;
     } else {
@@ -542,7 +505,6 @@ export class Game {
       this.ui.speedo.style.display = 'block';
       this.ui.boostWrap.style.display = 'block';
       this.ui.minimap.style.display = 'block';
-      this.ui.ammoWrap.style.display = 'block';
       this.ui.controlsHint.style.display = 'block';
     }
   }
@@ -1254,9 +1216,6 @@ export class Game {
     const hb = document.getElementById('health-bar');
     if (hb) hb.style.width = `${Math.max(0, this.health)}%`;
 
-    // Speedometer
-    const kmh = this.vehicle.getSpeedKmh();
-
     // Crosshair visibility
     const fast = Math.abs(this.vehicle.speed) > 10;
     this.ui.crosshair.classList.toggle('active', fast);
@@ -1647,8 +1606,8 @@ export class Game {
 
   showDialogue(type) {
     const text = this.getDialogue(type);
-    if (text) this.showPassengerInfo(text);
-    if (type !== 'pickup' && type !== 'delivery') {
+    if (text) {
+      this.showPassengerInfo(text);
       setTimeout(() => this.hidePassengerInfo(), 2000);
     }
   }
@@ -1734,7 +1693,6 @@ export class Game {
     this.ui.minimap.style.display = 'none';
     this.ui.speedo.style.display = 'none';
     this.ui.boostWrap.style.display = 'none';
-    this.ui.ammoWrap.style.display = 'none';
     this.ui.crosshair.classList.remove('active');
     this.ui.comboDisplay.classList.remove('visible');
     this.hidePassengerInfo();

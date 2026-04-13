@@ -21,7 +21,7 @@ export class Vehicle {
     // Grip (reduced in rain)
     this.gripMultiplier = 1;
 
-    // Upgrade mods (set by Game.applyUpgrades)
+    // Upgrade mods
     this.maxSpeedMod = 1;
     this.brakeMod = 1;
     this.boostDurationMod = 1;

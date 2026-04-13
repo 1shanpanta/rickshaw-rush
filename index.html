@@ -28,14 +28,6 @@
     .hud-timer .hud-big{text-align:right}
     .hud-timer .hud-big.warn{color:#ff6b6b;animation:pulse .5s ease-in-out infinite}
 
-    /* --- Ammo display --- */
-    #ammo-wrap{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);pointer-events:none;z-index:10;display:none;text-align:center}
-    #ammo-wrap{display:none!important}
-    #ammo-dots{display:flex;gap:6px;justify-content:center}
-    .ammo-dot{width:10px;height:10px;border-radius:50%;background:#3399ff;border:1px solid rgba(255,255,255,.2);transition:opacity .2s}
-    .ammo-dot.empty{opacity:.15}
-    #ammo-label{font-size:9px;color:rgba(255,255,255,.35);text-transform:uppercase;letter-spacing:1.5px;margin-top:4px}
-
     /* --- Crosshair --- */
     #crosshair{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:20px;height:20px;pointer-events:none;z-index:9;opacity:0;transition:opacity .3s}
     #crosshair::before,#crosshair::after{content:'';position:absolute;background:rgba(255,255,255,.25)}
@@ -271,12 +263,6 @@
       <div id="btn-resume" class="menu-btn" style="border-color:#4ade80;background:rgba(74,222,128,.1);margin-bottom:12px;width:180px;text-align:center">RESUME</div>
       <div id="btn-exit-menu" class="menu-btn" style="border-color:#ff6b6b;background:rgba(255,107,107,.1);width:180px;text-align:center">EXIT TO MENU</div>
     </div>
-  </div>
-
-  <!-- Ammo display -->
-  <div id="ammo-wrap">
-    <div id="ammo-dots"></div>
-    <div id="ammo-label">F -- Shoot</div>
   </div>
 
   <!-- Menu / Game Over -->
