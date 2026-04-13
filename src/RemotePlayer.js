@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { removeAndDispose } from './utils.js';
 
 export class RemotePlayer {
   constructor(scene, id, color, name) {
@@ -122,6 +123,6 @@ export class RemotePlayer {
   }
 
   destroy() {
-    this.scene.remove(this.mesh);
+    removeAndDispose(this.scene, this.mesh);
   }
 }

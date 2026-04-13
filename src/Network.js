@@ -11,6 +11,7 @@ export class Network {
     this.stateBuffer = {};
     this.sendTimer = 0;
     this.SEND_RATE = 0.05; // 20 updates/sec
+    this.serverTimeOffset = 0; // serverTime - clientTime
 
     // Callbacks (set by Game)
     this.onRoomCreated = null;
@@ -33,6 +34,7 @@ export class Network {
     this.socket.on('connect', () => {
       this.connected = true;
       this.playerId = this.socket.id;
+      this.syncTime();
     });
 
     this.socket.on('disconnect', () => {
@@ -114,8 +116,23 @@ export class Network {
     this.socket?.emit('balloon', data);
   }
 
-  sendGameOver(data) {
-    this.socket?.emit('game-over', data);
+  sendGameOver() {
+    this.socket?.emit('game-over');
+  }
+
+  syncTime() {
+    if (!this.socket || !this.connected) return;
+    const clientTime = Date.now();
+    this.socket.emit('time-sync', clientTime, (response) => {
+      if (!response) return;
+      const now = Date.now();
+      const roundTrip = now - clientTime;
+      this.serverTimeOffset = response.serverTime - clientTime - roundTrip / 2;
+    });
+  }
+
+  getServerTime() {
+    return Date.now() + this.serverTimeOffset;
   }
 
   getRemoteStates() {

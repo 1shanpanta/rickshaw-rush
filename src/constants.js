@@ -1,8 +1,8 @@
-export const CELL_SIZE = 22;
-export const GRID_SIZE = 24;
+export const CELL_SIZE = 30;
+export const GRID_SIZE = 40;
 
 export const COLORS = {
-  road: 0x3a3a3a,
+  road: 0x999999,
   sidewalk: 0x888888,
   sky: 0x8ec8e8,
   fog: 0xc8dde8,
@@ -22,34 +22,21 @@ export const COLORS = {
 };
 
 export const VEHICLE = {
-  maxSpeed: 44,
-  boostSpeed: 65,
-  acceleration: 34,
-  brakeForce: 55,
-  friction: 4.5,
-  turnSpeed: 3.0,
-  reverseMaxSpeed: 12,
-  boostDuration: 2.5,
-  boostCooldown: 4,
+  maxSpeed: 55,
+  boostSpeed: 80,
+  acceleration: 50,
+  brakeForce: 65,
+  friction: 3.5,
+  turnSpeed: 2.8,
+  reverseMaxSpeed: 15,
+  boostDuration: 3.0,
+  boostCooldown: 3,
 };
 
 export const GAME = {
   totalTime: 150,
   nearMissBonus: 25,
   nearMissDistance: 3.5,
-  comboWindow: 15,
-  comboMultipliers: [1, 1.5, 2, 2.5, 3],
-};
-
-export const FARE = {
-  baseFare: 14,
-  ratePerUnit: 0.6,
-  surgeMult: 1.5,
-};
-
-export const RATING = {
-  timeThreshold: 28,
-  tipMultipliers: [0.75, 1, 1.25, 1.6],
 };
 
 export const TRAFFIC_LIGHT = {
@@ -59,12 +46,68 @@ export const TRAFFIC_LIGHT = {
   fineAmount: 50,
 };
 
-export const LEVELS = {
-  deliveriesPerLevel: 3,
-  extraTraffic: 2,
-};
-
 export const MUSIC = {
   bpm: 95,
   scale: [261.63, 293.66, 349.23, 392.00, 440.00, 523.25],
+};
+
+// --- Map presets ---
+export const MAPS = {
+  kathmandu: {
+    name: 'Kathmandu',
+    subtitle: 'The Capital Chaos',
+    description: 'Dense traffic, narrow lanes, the iconic Stupa',
+    terrainScale: 1.0,
+    terrainAmplitude: [4, 1.8, 0.6],
+    buildingColors: COLORS.buildings,
+    skyColor: COLORS.sky,
+    fogColor: COLORS.fog,
+    fogDensity: 0.0018,
+    grassColor: COLORS.grass,
+    groundTint: COLORS.grass,
+    mountainColor: 0x6b8e6b,
+    ambientIntensity: 0.65,
+    sunIntensity: 0.9,
+    buildingHeightRange: [6, 30],
+    treeChance: 0.15,
+    trafficMultiplier: 1.0,
+  },
+  pokhara: {
+    name: 'Pokhara',
+    subtitle: 'Lakeside Hills',
+    description: 'Rolling hills, lake views, relaxed vibes',
+    terrainScale: 1.8,
+    terrainAmplitude: [8, 3.5, 1.2],
+    buildingColors: [0xdde8d0, 0xc8d8b8, 0xb8c8a8, 0xe8e0d0, 0xd0c8b8, 0xf0ece0, 0xc4b8a0, 0xe0d8c8, 0xd8d0c0, 0xc8c0b0, 0xb0a898, 0xe8e4d8],
+    skyColor: 0x7ec4f0,
+    fogColor: 0xd0e8f0,
+    fogDensity: 0.0012,
+    grassColor: 0x4a9a3a,
+    groundTint: 0x4a9a3a,
+    mountainColor: 0x8aaa8a,
+    ambientIntensity: 0.75,
+    sunIntensity: 1.0,
+    buildingHeightRange: [4, 16],
+    treeChance: 0.35,
+    trafficMultiplier: 0.6,
+  },
+  bhaktapur: {
+    name: 'Bhaktapur',
+    subtitle: 'Ancient Alleys',
+    description: 'Narrow brick streets, old temples, heritage zone',
+    terrainScale: 0.5,
+    terrainAmplitude: [2, 1, 0.3],
+    buildingColors: [0x8b4513, 0xa0522d, 0x6b3410, 0x7a4320, 0x9c6836, 0x8a5e3c, 0x6e3b1e, 0x8c5e2e, 0x7c4e28, 0x9a6e44, 0x6c3a1a, 0x8e6240],
+    skyColor: 0xa0c4d8,
+    fogColor: 0xd8ccc0,
+    fogDensity: 0.0022,
+    grassColor: 0x6a7a4b,
+    groundTint: 0x8a7a5b,
+    mountainColor: 0x7a6a5a,
+    ambientIntensity: 0.55,
+    sunIntensity: 0.8,
+    buildingHeightRange: [5, 18],
+    treeChance: 0.08,
+    trafficMultiplier: 0.8,
+  },
 };

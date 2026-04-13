@@ -3,14 +3,24 @@ import { City } from './City.js';
 import { Vehicle } from './Vehicle.js';
 import { Traffic } from './Traffic.js';
 import { TrafficLights } from './TrafficLights.js';
-import { PassengerSystem } from './Passenger.js';
 import { Wildlife } from './Wildlife.js';
 import { Projectiles } from './Projectiles.js';
-import { Navigation } from './Navigation.js';
 import { MusicSystem } from './Music.js';
 import { RemotePlayer } from './RemotePlayer.js';
+import { RivalAI } from './RivalAI.js';
 import { Effects } from './Effects.js';
-import { GAME, CELL_SIZE, GRID_SIZE, TRAFFIC_LIGHT, LEVELS, FARE } from './constants.js';
+import { Police } from './Police.js';
+import { GAME, CELL_SIZE, GRID_SIZE, TRAFFIC_LIGHT, MAPS } from './constants.js';
+import { removeAndDispose } from './utils.js';
+
+// --- State machine ---
+export const STATE = { MENU: 'menu', PLAYING: 'playing', PAUSED: 'paused', GAMEOVER: 'gameover' };
+const VALID_TRANSITIONS = {
+  [STATE.MENU]: [STATE.PLAYING],
+  [STATE.PLAYING]: [STATE.PAUSED, STATE.GAMEOVER],
+  [STATE.PAUSED]: [STATE.PLAYING, STATE.GAMEOVER],
+  [STATE.GAMEOVER]: [STATE.MENU, STATE.PLAYING],
+};
 
 export class Game {
   constructor(scene, camera, sunLight, network, postProcessing = {}) {
@@ -20,7 +30,7 @@ export class Game {
     this.network = network;
     this.bloomPass = postProcessing.bloomPass || null;
     this.caPass = postProcessing.caPass || null;
-    this.state = 'menu';
+    this.state = STATE.MENU;
     this.mode = 'single'; // 'single' | 'online'
 
     // Slow-motion system
@@ -32,14 +42,6 @@ export class Game {
     // Photo mode
     this.photoMode = false;
     this.photoOrbitAngle = 0;
-
-    // Dynamic events
-    this.dynamicEventTimer = 20;
-    this.activeEvents = [];
-
-    // Drift spark timer
-    this.driftSparkTimer = 0;
-    this.tireMarkTimer = 0;
 
     // Remote players (online mode)
     this.remotePlayers = {};
@@ -55,16 +57,12 @@ export class Game {
 
     // Game state
     this.score = 0;
+    this.health = 100;
     this.timeLeft = GAME.totalTime;
     this.gameTime = 0;
-    this.deliveries = 0;
-    this.combo = 0;
-    this.comboTimer = 0;
-    this.nearMisses = 0;
-    this.totalStars = 0;
     this.violations = 0;
     this.fines = 0;
-    this.level = 1;
+    this.nearMisses = 0;
     this.highScore = parseInt(localStorage.getItem('rickshaw-rush-hs') || '0', 10);
     this.topScores = JSON.parse(localStorage.getItem('rickshaw-rush-top5') || '[]');
 
@@ -73,25 +71,13 @@ export class Game {
     this.camIdeal = new THREE.Vector3();
     this.camLookTarget = new THREE.Vector3();
 
-    // Weather
-    this.isRaining = false;
-    this.rainTimer = 0;
-    this.rainCooldown = 30;
+    // Weather (particles only — no rain logic)
     this.rainParticles = null;
     this.dustParticles = null;
 
     // Red light tracking
     this.wasInRedZone = false;
     this.redLightCooldown = 0;
-
-    // Drift scoring
-    this.driftTimer = 0;
-    this.driftScore = 0;
-    this.isDrifting = false;
-
-    // Time bonus pickups
-    this.timeBonuses = [];
-    this.timeBonusSpawnTimer = 12;
 
     // Player trail (for minimap)
     this.trail = [];
@@ -104,27 +90,12 @@ export class Game {
     this.crashFineCooldown = 0;
     this.crashFineAmount = 30;
 
+    // Power cut event
+    this.powerCutCooldown = 45;
+
     // Nepali dialogues
     this.dialogueTimer = 0;
     this.dialogues = {
-      pickup: [
-        'Namaste dai! Thamel jaanu paryo!',
-        'Chhito chhito! Late bhaisakyo!',
-        'Dai, meter chalaunos hai!',
-        'Bato hernu hai dai!',
-        'Au au kta ho! Chal chal!',
-        'Sabai jana au, jam!',
-        'Chiya khana Ratnapark jaaam!',
-        'Dai ekchhin! Ma aauchu!',
-      ],
-      delivery: [
-        'Dhanyabaad dai!',
-        'Ramro chalaunubhayo!',
-        'Paisa rakhnus!',
-        'Bahini lai pani bhanchu!',
-        'Aaba yo bato ma aaunuhos!',
-        'Ekdam ramro sewa!',
-      ],
       crash: [
         'Ke garnu bhayo dai!?',
         'Bato herna siknus!',
@@ -149,67 +120,55 @@ export class Game {
         'Monsoon aayo!',
         'Chhata lyaunu parne!',
       ],
+      policeChase: [
+        'Police aayo! Bhaga!',
+        'Siren bajyo! Chhito!',
+        'Dai, police pichha lagyo!',
+        'Traffic police! Bhaga bhaga!',
+      ],
+      policeCaught: [
+        'Samatyo! Fine tirnu paryo!',
+        'Police le rokyo!',
+        'Pakrayo dai!',
+        'License dekhau dai!',
+      ],
+      policeEscaped: [
+        'Bachyo! Kya speed!',
+        'Police chhutyo!',
+        'Escape garyo dai!',
+      ],
+      powerCut: [
+        'Batti gayo!',
+        'Load shedding aayo!',
+        'Andhyaro bhayo!',
+      ],
+      construction: [
+        'Bato banda chha!',
+        'Construction zone! Arko bato lau!',
+        'Road block! Ghumera jau!',
+      ],
+      festival: [
+        'Dashain aayo! Badhai chha!',
+        'Tihar ko ramailo!',
+        'Deusi re bhailo!',
+      ],
     };
 
+    // Map selection (set before start via setMap)
+    this.selectedMap = 'kathmandu';
+    this._currentMap = 'kathmandu';
+
     // Systems
-    this.city = new City(scene);
+    this.city = new City(scene, this.selectedMap);
     this.trafficLights = new TrafficLights(scene, this.city);
     this.vehicle = new Vehicle(scene);
     this.traffic = new Traffic(scene, this.city, this.trafficLights);
-    this.passengers = new PassengerSystem(scene, this.city);
     this.wildlife = new Wildlife(scene, this.city);
     this.projectiles = new Projectiles(scene);
-    this.navigation = new Navigation(scene, this.city);
+    this.rivalAI = new RivalAI(scene, this.city);
     this.music = new MusicSystem();
     this.effects = new Effects(scene);
-
-    // Exhaust particles
-    this.exhaustParticles = [];
-    this.exhaustTimer = 0;
-
-    // Vehicle headlights (glow during dusk)
-    this.headlightL = new THREE.PointLight(0xffffaa, 0, 18);
-    this.headlightR = new THREE.PointLight(0xffffaa, 0, 18);
-    scene.add(this.headlightL);
-    scene.add(this.headlightR);
-
-    // Speed trail
-    this.trailLength = 40;
-    this.trailPositions = new Float32Array(this.trailLength * 3);
-    this.trailOpacities = new Float32Array(this.trailLength);
-    const trailGeo = new THREE.BufferGeometry();
-    trailGeo.setAttribute('position', new THREE.BufferAttribute(this.trailPositions, 3));
-    this.speedTrail = new THREE.Line(
-      trailGeo,
-      new THREE.LineBasicMaterial({
-        color: 0x22d3ee,
-        transparent: true,
-        opacity: 0.6,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      })
-    );
-    this.speedTrail.frustumCulled = false;
-    scene.add(this.speedTrail);
-
-    // Glow trail (wider, softer)
-    const glowTrailGeo = new THREE.BufferGeometry();
-    this.glowTrailPositions = new Float32Array(this.trailLength * 3);
-    glowTrailGeo.setAttribute('position', new THREE.BufferAttribute(this.glowTrailPositions, 3));
-    this.glowTrail = new THREE.Points(
-      glowTrailGeo,
-      new THREE.PointsMaterial({
-        color: 0x4ade80,
-        size: 1.2,
-        transparent: true,
-        opacity: 0.3,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      })
-    );
-    this.glowTrail.frustumCulled = false;
-    scene.add(this.glowTrail);
-    this.trailIndex = 0;
+    this.police = new Police(scene, this.city, null); // music ref set after init
 
     // Particles
     this.createDustParticles();
@@ -222,7 +181,6 @@ export class Game {
       timer: document.getElementById('timer'),
       deliveries: document.getElementById('deliveries'),
       levelNum: document.getElementById('level-num'),
-      starsEarned: document.getElementById('stars-earned'),
       overlay: document.getElementById('screen-overlay'),
       passengerInfo: document.getElementById('passenger-info'),
       passengerText: document.getElementById('passenger-text'),
@@ -232,24 +190,21 @@ export class Game {
       controlsHint: document.getElementById('controls-hint'),
       minimap: document.getElementById('minimap'),
       speedoValue: document.getElementById('speedo-value'),
-      speedoBar: document.getElementById('speedo-bar'),
       speedo: document.getElementById('speedo'),
       boostBar: document.getElementById('boost-bar'),
       boostWrap: document.getElementById('boost-wrap'),
       boostStatus: document.getElementById('boost-status'),
-      farePanel: document.getElementById('fare-panel'),
-      fareValue: document.getElementById('fare-value'),
-      fareSurge: document.getElementById('fare-surge'),
       violationFlash: document.getElementById('violation-flash'),
       violationText: document.getElementById('violation-text'),
       levelUp: document.getElementById('level-up'),
       starPopup: document.getElementById('star-popup'),
       rainOverlay: document.getElementById('rain-overlay'),
-      ammoWrap: document.getElementById('ammo-wrap'),
-      ammoDots: document.getElementById('ammo-dots'),
       crosshair: document.getElementById('crosshair'),
       slowmoVignette: document.getElementById('slowmo-vignette'),
       photoModeEl: document.getElementById('photo-mode'),
+      policeWarning: document.getElementById('police-warning'),
+      festivalBanner: document.getElementById('festival-banner'),
+      powercutOverlay: document.getElementById('powercut-overlay'),
     };
 
     this.minimapCanvas = document.getElementById('minimap-canvas');
@@ -308,6 +263,21 @@ export class Game {
     this.scene.add(this.rainParticles);
   }
 
+  // --- State machine ---
+  setState(newState) {
+    const allowed = VALID_TRANSITIONS[this.state];
+    if (!allowed || !allowed.includes(newState)) {
+      console.warn(`Invalid state transition: ${this.state} -> ${newState}`);
+      return;
+    }
+    this.state = newState;
+  }
+
+  // --- Map selection ---
+  setMap(mapId) {
+    this.selectedMap = mapId;
+  }
+
   // --- Mode selection ---
   setMode(mode) {
     this.mode = mode;
@@ -326,7 +296,7 @@ export class Game {
   }
 
   handleRemoteScore(data) {
-    this.remoteScores[data.id] = { score: data.score, deliveries: data.deliveries, name: data.name };
+    this.remoteScores[data.id] = { score: data.score, name: data.name };
   }
 
   handleRemoteBalloon(data) {
@@ -346,26 +316,58 @@ export class Game {
     }
   }
 
-  // (Local split-screen removed -- using online multiplayer instead)
+  // --- Return to main menu from pause ---
+  returnToMenu() {
+    this.music.stop();
+    this.police.reset();
+    this.effects.cleanup();
+    // Hide gameplay UI
+    this.ui.hud.style.display = 'none';
+    this.ui.controlsHint.style.display = 'none';
+    this.ui.minimap.style.display = 'none';
+    this.ui.speedo.style.display = 'none';
+    this.ui.boostWrap.style.display = 'none';
+    this.ui.policeWarning?.classList.remove('active');
+    this.ui.powercutOverlay?.classList.remove('active');
+    const hudArrow = document.getElementById('hud-arrow');
+    if (hudArrow) hudArrow.style.display = 'none';
+    // Show main menu
+    const menuMain = document.getElementById('menu-main');
+    if (menuMain) menuMain.style.display = '';
+    const menuJoin = document.getElementById('menu-join');
+    if (menuJoin) menuJoin.style.display = 'none';
+    const menuLobby = document.getElementById('menu-lobby');
+    if (menuLobby) menuLobby.style.display = 'none';
+    this.ui.overlay.classList.remove('hidden');
+    this.state = STATE.MENU;
+  }
 
   // --- Start / Reset ---
   handleStart() {
-    if (this.state !== 'menu' && this.state !== 'gameover') return;
+    if (this.state !== STATE.MENU && this.state !== STATE.GAMEOVER) return;
 
-    this.state = 'playing';
+    this.setState(STATE.PLAYING);
+
+    // Apply map config to scene atmosphere
+    const mapCfg = MAPS[this.selectedMap] || MAPS.kathmandu;
+    this.scene.background.set(mapCfg.skyColor);
+    if (this.scene.fog) {
+      this.scene.fog.color.set(mapCfg.fogColor);
+      this.scene.fog.density = mapCfg.fogDensity;
+    }
+    if (this.sunLight) {
+      this.sunLight.intensity = mapCfg.sunIntensity;
+    }
+    this.city.mapConfig = mapCfg;
+    this._currentMap = this.selectedMap;
+
     this.score = 0;
+    this.health = 100;
     this.timeLeft = GAME.totalTime;
     this.gameTime = 0;
-    this.deliveries = 0;
-    this.combo = 0;
-    this.comboTimer = 0;
-    this.nearMisses = 0;
-    this.totalStars = 0;
     this.violations = 0;
     this.fines = 0;
-    this.level = 1;
-    this.isRaining = false;
-    this.rainCooldown = 30;
+    this.nearMisses = 0;
 
     const start = this.getStartPosition();
     this.vehicle.setPosition(start.x, 0, start.z);
@@ -373,30 +375,63 @@ export class Game {
     this.vehicle.rotation = 0;
     this.vehicle.gripMultiplier = 1;
 
-    this.passengers.reset();
+    
     this.traffic.reset();
     this.wildlife.reset();
+    this.rivalAI.reset();
+    // Race setup — pick a destination and spawn 3 AI racers
+    const roads = this.city.getRoadPositions();
+    const startPos = this.vehicle.position;
+    // Pick a destination far from start
+    let bestDest = null;
+    let bestDist = 0;
+    for (let i = 0; i < 20; i++) {
+      const rp = roads[Math.floor(Math.random() * roads.length)];
+      const d = startPos.distanceTo(rp);
+      if (d > bestDist) { bestDist = d; bestDest = rp.clone(); }
+    }
+    this.raceDestination = bestDest;
+    this.currentRound = 1;
+    this.totalRounds = 3;
+    this.playerFinished = false;
+    this.playerFinishTime = 0;
+    this._raceEndTimer = null;
 
-    // Clean time bonuses
-    for (const tb of this.timeBonuses) this.scene.remove(tb.mesh);
-    this.timeBonuses = [];
-    this.timeBonusSpawnTimer = 12;
+    // Destination marker in 3D
+    if (this._destMarker) this.scene.remove(this._destMarker);
+    this._destMarker = new THREE.Group();
+    const beacon = new THREE.Mesh(
+      new THREE.CylinderGeometry(3, 3, 40, 8, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0x4ade80, transparent: true, opacity: 0.15, side: THREE.DoubleSide })
+    );
+    beacon.position.y = 20;
+    this._destMarker.add(beacon);
+    const flag = new THREE.Mesh(
+      new THREE.BoxGeometry(1, 4, 0.1),
+      new THREE.MeshBasicMaterial({ color: 0x4ade80 })
+    );
+    flag.position.y = 6;
+    this._destMarker.add(flag);
+    this._destMarker.position.set(this.raceDestination.x, 0, this.raceDestination.z);
+    this.scene.add(this._destMarker);
+
+    this.rivalAI.setDestination(this.raceDestination);
+    this.rivalAI.spawn(3, start);
+
     this.trail = [];
-    this.driftTimer = 0;
-    this.driftScore = 0;
     this.fullmapOpen = false;
     this.timeScale = 1;
     this.slowMoTimer = 0;
     this.targetFOV = this.baseFOV;
     this.camera.fov = this.baseFOV;
     this.photoMode = false;
-    this.dynamicEventTimer = 20;
-    this.activeEvents = [];
-    this.driftSparkTimer = 0;
-    this.tireMarkTimer = 0;
     this.effects.cleanup();
     this._duskBellPlayed = false;
     if (this.ui.fullmap) this.ui.fullmap.style.display = 'none';
+
+    // Power cut
+    this.powerCutCooldown = 45;
+    this.trafficLights.endPowerCut();
 
     // UI
     this.ui.overlay.classList.add('hidden');
@@ -405,10 +440,14 @@ export class Game {
     this.ui.minimap.style.display = 'block';
     this.ui.speedo.style.display = 'block';
     this.ui.boostWrap.style.display = 'block';
-    this.ui.rainOverlay.classList.remove('active');
-    this.ui.ammoWrap.style.display = 'block';
-    this.rainParticles.visible = false;
+    const healthWrap = document.getElementById('health-bar-wrap');
+    if (healthWrap) healthWrap.style.display = 'block';
     this.projectiles.reset();
+
+    // Race countdown (3, 2, 1, GO!)
+    this._countdownTimer = 3.5;
+    this._countdownFrozen = true;
+    this._showCountdown(3);
 
     // Online mode: clean remote players, show MP scoreboard
     if (this.mode === 'online') {
@@ -422,9 +461,14 @@ export class Game {
       if (mpSb) mpSb.style.display = 'block';
     }
 
+    // Police
+    this.police.reset();
+    this.policeCaught = false;
+
     // Music
     this.music.init();
     this.music.resume();
+    this.police.music = this.music;
   }
 
   // --- Slow-motion ---
@@ -453,9 +497,7 @@ export class Game {
       this.ui.speedo.style.display = 'none';
       this.ui.boostWrap.style.display = 'none';
       this.ui.minimap.style.display = 'none';
-      this.ui.ammoWrap.style.display = 'none';
       this.ui.controlsHint.style.display = 'none';
-      this.ui.farePanel.style.display = 'none';
       this.photoOrbitAngle = this.vehicle.rotation;
     } else {
       this.ui.photoModeEl?.classList.remove('active');
@@ -463,14 +505,13 @@ export class Game {
       this.ui.speedo.style.display = 'block';
       this.ui.boostWrap.style.display = 'block';
       this.ui.minimap.style.display = 'block';
-      this.ui.ammoWrap.style.display = 'block';
       this.ui.controlsHint.style.display = 'block';
     }
   }
 
   // --- Main Update ---
   update(delta, keys) {
-    if (this.state !== 'playing') return;
+    if (this.state !== STATE.PLAYING) return;
     if (this.photoMode) {
       this.photoOrbitAngle += delta * 0.5;
       const vPos = this.vehicle.position;
@@ -484,18 +525,24 @@ export class Game {
       return;
     }
 
+    // Race countdown
+    if (this._countdownFrozen) {
+      const prevSec = Math.ceil(this._countdownTimer);
+      this._countdownTimer -= delta;
+      const curSec = Math.ceil(this._countdownTimer);
+      if (curSec !== prevSec && curSec > 0) this._showCountdown(curSec);
+      if (this._countdownTimer <= 0) {
+        this._countdownFrozen = false;
+        this._showCountdown(0); // "GO!"
+      }
+      this.updateCamera(delta);
+      this.updateUI();
+      return;
+    }
+
     this.gameTime += delta;
     this.timeLeft -= delta;
     if (this.timeLeft <= 0) { this.timeLeft = 0; this.gameOver(); return; }
-
-    // Combo decay
-    if (this.comboTimer > 0) {
-      this.comboTimer -= delta;
-      if (this.comboTimer <= 0) {
-        this.combo = 0;
-        this.ui.comboDisplay.classList.remove('visible');
-      }
-    }
 
     // Cooldowns
     if (this.redLightCooldown > 0) this.redLightCooldown -= delta;
@@ -514,6 +561,7 @@ export class Game {
     };
 
     // Vehicle
+    this.vehicle.terrainHeight = this.city.getTerrainHeight(this.vehicle.position.x, this.vehicle.position.z);
     this.vehicle.update(delta, input);
 
     // Honk
@@ -531,7 +579,7 @@ export class Game {
 
     // Collisions
     this.checkBuildingCollisions();
-    this.checkTrafficInteractions();
+    this.checkTrafficInteractions(delta);
     this.checkWildlifeCollisions();
 
     // Speed bumps
@@ -548,15 +596,50 @@ export class Game {
     this.wildlife.update(delta, this.vehicle.position);
 
     // Pigeon scatter
-    if (this.city.pigeonGroups) this.updatePigeonScatter(delta);
+    // Rival AI racers
+    this.rivalAI.update(delta, this.city.getNearbyBuildings(this.vehicle.position.x, this.vehicle.position.z), this.gameTime);
 
-    // Passengers
-    this.passengers.setSurge(this.isRaining);
-    const result = this.passengers.update(delta, this.vehicle.position, this.gameTime);
-    if (result) this.handlePassengerEvent(result);
+    // Check if player reached destination (within ~30 units / same road area)
+    if (this.raceDestination && !this.playerFinished) {
+      const dx = this.vehicle.position.x - this.raceDestination.x;
+      const dz = this.vehicle.position.z - this.raceDestination.z;
+      if (dx * dx + dz * dz < 900) { // within 30 units — same road area
+        this.playerFinished = true;
+        this.playerFinishTime = this.gameTime;
+        // Show finish announcement
+        const positions = this.rivalAI.getPositions(this.vehicle.position, true, this.gameTime, this.gameTime);
+        const pos = positions.findIndex(p => p.isPlayer) + 1;
+        const suffix = pos === 1 ? 'st' : pos === 2 ? 'nd' : pos === 3 ? 'rd' : 'th';
+        const msg = pos === 1 ? `🏆 ${pos}${suffix} PLACE! +500 pts` : `${pos}${suffix} PLACE! +${[500,300,150,50][pos-1]} pts`;
+        this.showPassengerInfo(msg);
+        setTimeout(() => this.hidePassengerInfo(), 3000);
+      }
+    }
 
-    // Weather
-    this.updateWeather(delta);
+    // Check if round ended (player or all AI finished)
+    if (this.playerFinished || this.rivalAI.getRivals().every(r => r.finished)) {
+      if (!this._raceEndTimer) this._raceEndTimer = 2;
+      this._raceEndTimer -= delta;
+      if (this._raceEndTimer <= 0) {
+        this._raceEndTimer = null;
+        // Score points based on position
+        const positions = this.rivalAI.getPositions(this.vehicle.position, this.playerFinished, this.playerFinishTime, this.gameTime);
+        const playerPos = positions.findIndex(p => p.isPlayer);
+        const roundPoints = [500, 300, 150, 50];
+        this.score += roundPoints[playerPos] || 0;
+
+        this.currentRound++;
+        if (this.currentRound > this.totalRounds) {
+          this.gameOver();
+          return;
+        }
+        // Start next round
+        this.startNextRound();
+      }
+    }
+
+    // Update race position HUD
+    this.updateRacePosition();
 
     // Day cycle
     this.updateDayCycle();
@@ -564,38 +647,39 @@ export class Game {
     // Dust particles drift
     this.updateDust(delta);
 
-    // Projectiles
-    if (input.fire && !this._fireCooldown) {
+    // Projectiles — continuous fire with rate limit
+    if (!this._fireRate) this._fireRate = 0;
+    if (this._fireRate > 0) this._fireRate -= delta;
+    if (input.fire && this._fireRate <= 0) {
       if (this.projectiles.fire(this.vehicle.position, this.vehicle.rotation, this.vehicle.speed)) {
-        this.music.playHonk();
-        this._fireCooldown = true;
+        this._fireRate = 0.08; // fire every 80ms while held — rapid fire
       }
     }
-    if (!input.fire) this._fireCooldown = false;
-    this.projectiles.update(delta, this.traffic, this.wildlife);
+    this.projectiles.update(delta, this.traffic, this.wildlife, this.police, this.rivalAI);
 
-    // Navigation arrows
-    const navTarget = this.passengers.getDropoffPosition() || this.passengers.getPickupPosition();
-    this.navigation.update(this.vehicle.position, navTarget);
-
-    // Exhaust particles
-    this.updateExhaust(delta);
-
-    // Headlights (brighter at dusk)
-    const dayProgress = this.gameTime / GAME.totalTime;
-    const hlIntensity = dayProgress > 0.75 ? (dayProgress - 0.75) * 8 : 0;
-    const vRot = this.vehicle.rotation;
-    const vPos = this.vehicle.position;
-    this.headlightL.intensity = hlIntensity;
-    this.headlightR.intensity = hlIntensity;
-    this.headlightL.position.set(vPos.x + Math.sin(vRot) * 3 - Math.cos(vRot) * 0.6, 1.5, vPos.z + Math.cos(vRot) * 3 + Math.sin(vRot) * 0.6);
-    this.headlightR.position.set(vPos.x + Math.sin(vRot) * 3 + Math.cos(vRot) * 0.6, 1.5, vPos.z + Math.cos(vRot) * 3 - Math.sin(vRot) * 0.6);
-
-    // Drift scoring
-    this.updateDrift(delta, input);
-
-    // Time bonus pickups
-    this.updateTimeBonuses(delta);
+    // HUD direction arrow — points to race destination
+    const hudArrow = document.getElementById('hud-arrow');
+    if (hudArrow) {
+      if (this.raceDestination && !this.playerFinished) {
+        hudArrow.style.display = 'block';
+        // Project destination to screen space — always accurate regardless of camera angle
+        const dest3D = new THREE.Vector3(this.raceDestination.x, 2, this.raceDestination.z);
+        const projected = dest3D.clone().project(this.camera);
+        // projected.x/y are in NDC (-1 to 1), where +x = right, +y = up
+        const screenAngle = Math.atan2(projected.x, projected.y);
+        const arrowSvg = hudArrow.querySelector('svg');
+        if (arrowSvg) arrowSvg.style.transform = `rotate(${screenAngle * 180 / Math.PI}deg)`;
+        const poly = hudArrow.querySelector('polygon');
+        if (poly) poly.setAttribute('fill', '#4ade80');
+        const dx = this.raceDestination.x - this.vehicle.position.x;
+        const dz = this.raceDestination.z - this.vehicle.position.z;
+        const dist = Math.round(Math.sqrt(dx * dx + dz * dz));
+        const label = document.getElementById('hud-arrow-label');
+        if (label) label.textContent = `FINISH ${dist}m`;
+      } else {
+        hudArrow.style.display = 'none';
+      }
+    }
 
     // Player trail
     this.trailTimer += delta;
@@ -608,17 +692,54 @@ export class Game {
     // Effects update (celebrations, sparks, debris, tire marks)
     this.effects.update(delta);
 
-    // Speed trail update
-    this.updateSpeedTrail();
-
     // Chromatic aberration on boost
     if (this.caPass) {
       const targetCA = this.vehicle.boosting ? 0.008 : (this.slowMoTimer > 0 ? 0.004 : 0);
       this.caPass.uniforms.amount.value += (targetCA - this.caPass.uniforms.amount.value) * Math.min(8 * delta, 1);
     }
 
-    // Dynamic events
-    this.updateDynamicEvents(delta);
+    // Power cut event
+    this.updatePowerCut(delta);
+
+    // Police chase
+    const policeResult = this.police.update(delta, this.vehicle.position, this.city.getNearbyBuildings(this.police.position.x, this.police.position.z));
+
+    // Distance-based warnings
+    if (this.police.isActive()) {
+      const pdx = this.vehicle.position.x - this.police.position.x;
+      const pdz = this.vehicle.position.z - this.police.position.z;
+      const distSq = pdx * pdx + pdz * pdz;
+      const tier = distSq < 100 ? 0 : distSq < 400 ? 1 : distSq < 1225 ? 2 : 3;
+      if (tier !== this._lastPoliceTier) {
+        this._lastPoliceTier = tier;
+        const warning = this.ui.policeWarning;
+        if (warning) {
+          const msgs = ['POLICE! ALMOST CAUGHT!', 'POLICE CLOSING IN!', 'POLICE APPROACHING!', 'POLICE! ESCAPE!'];
+          const sizes = ['26px', '22px', '18px', '20px'];
+          warning.textContent = msgs[tier];
+          warning.style.fontSize = sizes[tier];
+        }
+      }
+      if (distSq < 225) this.shakeIntensity = Math.max(this.shakeIntensity, 0.15);
+    }
+
+    if (policeResult) {
+      if (policeResult.type === 'caught') {
+        this.shakeIntensity = 0.8;
+        this.music.playViolation();
+        this.showDialogue('policeCaught');
+        this.policeCaught = true;
+        this.score = Math.max(0, this.score - 500);
+        this.fines += 500;
+        this.gameOver();
+        return;
+      } else if (policeResult.type === 'escaped') {
+        const bonus = 50;
+        this.score += bonus;
+        this.showPassengerInfo(`${this.getDialogue('policeEscaped')} +Rs. ${bonus}`);
+        setTimeout(() => this.hidePassengerInfo(), 2000);
+      }
+    }
 
     // Wind sound
     if (this.music.updateWind) {
@@ -669,7 +790,6 @@ export class Game {
       if (Math.floor(this.gameTime * 2) !== Math.floor((this.gameTime - delta) * 2)) {
         this.network.sendScoreUpdate({
           score: this.score,
-          deliveries: this.deliveries,
           name: this.network.players.find(p => p.id === this.network.playerId)?.name || 'You',
         });
       }
@@ -687,8 +807,16 @@ export class Game {
 
     // UI
     this.updateUI();
+
+    // Police warning overlay
+    this.ui.policeWarning?.classList.toggle('active', this.police.isActive());
+
+    // Power cut overlay
+    this.ui.powercutOverlay?.classList.toggle('active', this.trafficLights.isPowerCut());
+
     if (this.mode === 'single') {
-      this.updateMinimap();
+      this._minimapFrame = (this._minimapFrame || 0) + 1;
+      if (this._minimapFrame % 2 === 0) this.updateMinimap();
       if (this.fullmapOpen) this.drawFullmap();
     }
   }
@@ -723,36 +851,43 @@ export class Game {
     // Build scoreboard
     const myName = this.network?.players.find(p => p.id === this.network.playerId)?.name || 'You';
     const allScores = [
-      { name: myName, score: this.score, dels: this.deliveries, me: true },
-      ...Object.values(this.remoteScores).map(s => ({ name: s.name, score: s.score, dels: s.deliveries, me: false })),
+      { name: myName, score: this.score, me: true },
+      ...Object.values(this.remoteScores).map(s => ({ name: s.name, score: s.score, me: false })),
     ].sort((a, b) => b.score - a.score);
 
     mpScores.innerHTML = allScores.map(s =>
-      `<span style="opacity:${s.me ? '1' : '.6'};${s.me ? 'color:#4ade80' : ''}">${s.name}: Rs.${s.score} (${s.dels})</span>`
+      `<span style="opacity:${s.me ? '1' : '.6'};${s.me ? 'color:#4ade80' : ''}">${s.name}: ${s.score} pts</span>`
     ).join(' | ');
   }
 
   // --- Collisions ---
   checkBuildingCollisions() {
     const pos = this.vehicle.position;
-    const r = 1.8;
-    for (const b of this.city.getBuildingBounds()) {
+    const r = 2.5;
+    for (const b of this.city.getNearbyBuildings(pos.x, pos.z)) {
       const cx = Math.max(b.minX, Math.min(pos.x, b.maxX));
       const cz = Math.max(b.minZ, Math.min(pos.z, b.maxZ));
       const dx = pos.x - cx;
       const dz = pos.z - cz;
       const dist = Math.sqrt(dx * dx + dz * dz);
       if (dist < r) {
-        const push = r - dist;
-        if (dist > 0.001) { pos.x += (dx / dist) * push; pos.z += (dz / dist) * push; }
-        else pos.x += push;
-        if (Math.abs(this.vehicle.speed) > 5) {
-          this.shakeIntensity = Math.min(Math.abs(this.vehicle.speed) * 0.02, 0.5);
-          this.passengers.recordCrash();
-          this.effects.spawnDebris(this.vehicle.position, 0x998877);
+        // Hard push-out + bounce
+        const pushStr = (r - dist) + 2.0;
+        if (dist > 0.001) { pos.x += (dx / dist) * pushStr; pos.z += (dz / dist) * pushStr; }
+        else { pos.x += pushStr; }
+        // Bounce speed on first contact
+        if (this.crashFineCooldown <= 0) {
+          const bounceForce = Math.min(Math.abs(this.vehicle.speed) * 0.4, 20);
+          this.vehicle.speed = -Math.sign(this.vehicle.speed || 1) * bounceForce;
+          this.shakeIntensity = 0.3;
+          this.health -= 5;
+          
           if (this.music.playCollisionThud) this.music.playCollisionThud(Math.min(Math.abs(this.vehicle.speed) / 40, 1));
+          this.crashFineCooldown = 0.5;
+          const flash = document.getElementById('screen-flash');
+          if (flash) { flash.style.background = 'rgba(255,50,50,0.25)'; flash.style.opacity = '1'; setTimeout(() => { flash.style.opacity = '0'; }, 150); }
+          if (this.health <= 0) { this.health = 0; this.gameOver(); return; }
         }
-        this.vehicle.speed *= 0.2;
       }
     }
     const citySize = GRID_SIZE * CELL_SIZE;
@@ -760,34 +895,58 @@ export class Game {
     pos.z = Math.max(2, Math.min(citySize - 2, pos.z));
   }
 
-  checkTrafficInteractions() {
+  checkTrafficInteractions(delta) {
     const vPos = this.vehicle.position;
     const vSpeed = Math.abs(this.vehicle.speed);
     const vR = 2;
 
-    for (const npc of this.traffic.vehicles) {
+    for (const npc of this.traffic.getNearby(vPos.x, vPos.z)) {
       const dx = vPos.x - npc.position.x;
       const dz = vPos.z - npc.position.z;
       const dist = Math.sqrt(dx * dx + dz * dz);
 
       if (dist < vR + npc.radius) {
-        const push = (vR + npc.radius - dist) * 0.6;
-        if (dist > 0.001) { vPos.x += (dx / dist) * push; vPos.z += (dz / dist) * push; }
-        this.vehicle.speed *= 0.15;
-        this.shakeIntensity = 0.4;
-        this.passengers.recordCrash();
-        // Debris on collision
-        this.effects.spawnDebris(npc.position);
-        if (this.music.playCollisionThud) this.music.playCollisionThud(Math.min(vSpeed / 40, 1));
-        // Crash fine
-        if (this.crashFineCooldown <= 0 && vSpeed > 8) {
-          this.crashFineCooldown = 2;
-          this.score = Math.max(0, this.score - this.crashFineAmount);
-          this.fines += this.crashFineAmount;
-          this.showDialogue('crash');
-          this.showViolation();
-          this.music.playViolation();
+        // Always push out hard — guarantee escape
+        const overlap = vR + npc.radius - dist;
+        const pushStr = overlap + 2.0;
+        if (dist > 0.001) {
+          vPos.x += (dx / dist) * pushStr;
+          vPos.z += (dz / dist) * pushStr;
+        } else {
+          vPos.x += pushStr;
         }
+        // Also push the NPC away
+        if (dist > 0.001) {
+          npc.position.x -= (dx / dist) * overlap * 0.5;
+          npc.position.z -= (dz / dist) * overlap * 0.5;
+        }
+        // Bounce + effects only on first contact (cooldown-gated)
+        if (this.crashFineCooldown <= 0) {
+          const bounceForce = Math.min(vSpeed * 0.35, 18);
+          this.vehicle.speed = -Math.sign(this.vehicle.speed || 1) * bounceForce;
+          this.shakeIntensity = 0.3;
+          this.health -= 10;
+          
+          if (this.health <= 0) { this.health = 0; this.gameOver(); return; }
+          if (this.music.playCollisionThud) this.music.playCollisionThud(Math.min(vSpeed / 40, 1));
+          const flash = document.getElementById('screen-flash');
+          if (flash) { flash.style.background = 'rgba(255,50,50,0.25)'; flash.style.opacity = '1'; setTimeout(() => { flash.style.opacity = '0'; }, 150); }
+          if (vSpeed > 8) {
+            this.crashFineCooldown = 1.5;
+            this.score = Math.max(0, this.score - this.crashFineAmount);
+            this.fines += this.crashFineAmount;
+            this.showDialogue('crash');
+            this.showViolation();
+            this.music.playViolation();
+            if (vSpeed > 30 && !this.police.isActive()) {
+              this.police.activate(this.vehicle.position);
+              this.showDialogue('policeChase');
+            }
+          } else {
+            this.crashFineCooldown = 0.5;
+          }
+        }
+        // On subsequent overlap frames, just push — no speed change
       } else if (dist < GAME.nearMissDistance + npc.radius && vSpeed > 15) {
         if (!npc._nmCd || npc._nmCd <= 0) {
           npc._nmCd = 2;
@@ -800,7 +959,7 @@ export class Game {
           this.effects.spawnNearMissFlash();
         }
       }
-      if (npc._nmCd > 0) npc._nmCd -= 0.016;
+      if (npc._nmCd > 0) npc._nmCd -= delta;
     }
   }
 
@@ -812,11 +971,19 @@ export class Game {
       const dz = vPos.z - a.position.z;
       const dist = Math.sqrt(dx * dx + dz * dz);
       if (dist < vR + a.radius) {
-        const push = (vR + a.radius - dist) * 0.6;
-        if (dist > 0.001) { vPos.x += (dx / dist) * push; vPos.z += (dz / dist) * push; }
-        this.vehicle.speed *= 0.1;
-        this.shakeIntensity = 0.6;
-        this.passengers.recordCrash();
+        const pushStr = (vR + a.radius - dist) + 2.5;
+        if (dist > 0.001) { vPos.x += (dx / dist) * pushStr; vPos.z += (dz / dist) * pushStr; }
+        if (this.crashFineCooldown <= 0) {
+          const bounceForce = Math.min(Math.abs(this.vehicle.speed) * 0.5, 22);
+          this.vehicle.speed = -Math.sign(this.vehicle.speed || 1) * bounceForce;
+          this.shakeIntensity = 0.5;
+          this.health -= 8;
+          
+          this.crashFineCooldown = 0.5;
+          const flash = document.getElementById('screen-flash');
+          if (flash) { flash.style.background = 'rgba(255,50,50,0.25)'; flash.style.opacity = '1'; setTimeout(() => { flash.style.opacity = '0'; }, 150); }
+          if (this.health <= 0) { this.health = 0; this.gameOver(); return; }
+        }
       }
     }
   }
@@ -831,139 +998,20 @@ export class Game {
       this.violations++;
       this.fines += TRAFFIC_LIGHT.fineAmount;
       this.score = Math.max(0, this.score - TRAFFIC_LIGHT.fineAmount);
-      this.passengers.recordRedLight();
+      
       this.redLightCooldown = 3;
       this.showViolation();
       this.showDialogue('redLight');
       this.music.playViolation();
+
+      // Trigger police after 3+ violations
+      if (this.violations >= 3 && !this.police.isActive()) {
+        this.police.activate(this.vehicle.position);
+        this.showDialogue('policeChase');
+      }
     }
 
     this.wasInRedZone = isInRedZone;
-  }
-
-  // --- Passenger events ---
-  handlePassengerEvent(result) {
-    if (result.type === 'pickup') {
-      const dialogue = this.getDialogue('pickup');
-      this.showPassengerInfo(`${result.name}: "${dialogue}" -- to ${result.destination}`);
-      this.ui.farePanel.style.display = 'block';
-      this.music.playPickup();
-      setTimeout(() => this.hidePassengerInfo(), 3500);
-    } else if (result.type === 'delivered') {
-      this.combo = Math.min(this.combo + 1, GAME.comboMultipliers.length - 1);
-      this.comboTimer = GAME.comboWindow;
-      const mult = GAME.comboMultipliers[this.combo];
-      const finalReward = Math.round(result.reward * mult);
-
-      this.score += finalReward;
-      this.deliveries++;
-      this.totalStars += result.stars;
-
-      const comboText = this.combo > 0 ? ` (x${mult} COMBO!)` : '';
-      const delivDialogue = this.getDialogue('delivery');
-      this.showPassengerInfo(`"${delivDialogue}" +Rs. ${finalReward}${comboText}`);
-      this.showStarRating(result.stars);
-
-      if (this.combo > 0) {
-        this.ui.comboDisplay.textContent = `COMBO x${mult}`;
-        this.ui.comboDisplay.classList.add('visible');
-      }
-
-      this.ui.farePanel.style.display = 'none';
-      this.projectiles.refillAmmo(2);
-
-      // Celebration effects!
-      this.effects.spawnCelebration(this.vehicle.position);
-      if (this.music.playCelebration) {
-        this.music.playCelebration();
-      } else {
-        this.music.playDelivery();
-      }
-
-      // Combo milestone flash
-      if (this.combo >= 2) {
-        this.effects.spawnComboFlash();
-        if (this.music.setComboLevel) this.music.setComboLevel(this.combo);
-      }
-
-      setTimeout(() => this.hidePassengerInfo(), 2500);
-
-      // Level up check
-      if (this.deliveries > 0 && this.deliveries % LEVELS.deliveriesPerLevel === 0) {
-        this.levelUp();
-      }
-    } else if (result.type === 'timeout') {
-      this.combo = 0;
-      this.comboTimer = 0;
-      this.ui.comboDisplay.classList.remove('visible');
-      this.ui.farePanel.style.display = 'none';
-      this.showPassengerInfo('Passenger left! Too slow...');
-      setTimeout(() => this.hidePassengerInfo(), 2000);
-    }
-  }
-
-  levelUp() {
-    this.level++;
-    this.traffic.addMore(LEVELS.extraTraffic);
-
-    const el = this.ui.levelUp;
-    el.textContent = `LEVEL ${this.level}!`;
-    el.style.animation = 'none';
-    el.offsetHeight;
-    el.style.animation = 'levelUpAnim 1.5s ease-out forwards';
-
-    // Trigger rain at certain levels
-    if (this.level === 3 && !this.isRaining) this.startRain();
-  }
-
-  // --- Weather ---
-  updateWeather(delta) {
-    this.rainCooldown -= delta;
-
-    if (this.isRaining) {
-      this.rainTimer -= delta;
-      if (this.rainTimer <= 0) this.stopRain();
-      else this.updateRainParticles(delta);
-    } else if (this.rainCooldown <= 0 && Math.random() < 0.001) {
-      this.startRain();
-    }
-  }
-
-  startRain() {
-    this.isRaining = true;
-    this.rainTimer = 15 + Math.random() * 10;
-    this.vehicle.gripMultiplier = 0.65;
-    this.rainParticles.visible = true;
-    this.ui.rainOverlay.classList.add('active');
-    this.ui.fareSurge.textContent = 'SURGE x1.5';
-    if (this.music.startRainSound) this.music.startRainSound();
-    this.showPassengerInfo('Monsoon rain! Fares surge, roads slippery!');
-    this.showDialogue('rain');
-    setTimeout(() => this.hidePassengerInfo(), 2500);
-  }
-
-  stopRain() {
-    this.isRaining = false;
-    this.rainCooldown = 25 + Math.random() * 20;
-    this.vehicle.gripMultiplier = 1;
-    this.rainParticles.visible = false;
-    this.ui.rainOverlay.classList.remove('active');
-    this.ui.fareSurge.textContent = '';
-    if (this.music.stopRainSound) this.music.stopRainSound();
-  }
-
-  updateRainParticles(delta) {
-    const arr = this.rainParticles.geometry.attributes.position.array;
-    const pPos = this.vehicle.position;
-    for (let i = 0; i < arr.length; i += 3) {
-      arr[i + 1] -= 45 * delta;
-      if (arr[i + 1] < 0) {
-        arr[i] = pPos.x + (Math.random() - 0.5) * 200;
-        arr[i + 1] = 40 + Math.random() * 15;
-        arr[i + 2] = pPos.z + (Math.random() - 0.5) * 200;
-      }
-    }
-    this.rainParticles.geometry.attributes.position.needsUpdate = true;
   }
 
   updateDust(delta) {
@@ -1008,13 +1056,6 @@ export class Game {
       fogDensity = 0.005 + t * 0.003;
     }
 
-    // Apply rain darkening
-    if (this.isRaining) {
-      skyColor.multiplyScalar(0.6);
-      sunIntensity *= 0.5;
-      fogDensity += 0.002;
-    }
-
     this.scene.background = skyColor;
     this.scene.fog = new THREE.FogExp2(skyColor, fogDensity);
     this.sunLight.color = sunColor;
@@ -1038,7 +1079,6 @@ export class Game {
       } else {
         bloomStrength = 0.65 + (progress - 0.82) / 0.18 * 0.35; // night: full glow
       }
-      if (this.isRaining) bloomStrength += 0.1;
       this.bloomPass.strength = bloomStrength;
     }
   }
@@ -1089,221 +1129,96 @@ export class Game {
   }
 
   // --- UI ---
+  _showCountdown(num) {
+    let el = document.getElementById('countdown-display');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'countdown-display';
+      el.style.cssText = 'position:fixed;top:40%;left:50%;transform:translate(-50%,-50%);z-index:25;pointer-events:none;text-align:center;color:#fff;font-size:80px;font-weight:700;text-shadow:0 4px 20px rgba(0,0,0,.7);transition:transform .3s,opacity .3s';
+      document.body.appendChild(el);
+    }
+    if (num > 0) {
+      el.textContent = Math.ceil(num);
+      el.style.opacity = '1';
+      el.style.transform = 'translate(-50%,-50%) scale(1.2)';
+      setTimeout(() => { el.style.transform = 'translate(-50%,-50%) scale(1)'; }, 100);
+    } else {
+      el.textContent = 'GO!';
+      el.style.color = '#4ade80';
+      el.style.opacity = '1';
+      setTimeout(() => { el.style.opacity = '0'; }, 800);
+    }
+  }
+
+  updateRacePosition() {
+    const positions = this.rivalAI.getPositions(
+      this.vehicle.position, this.playerFinished, this.playerFinishTime, this.gameTime
+    );
+    const playerIdx = positions.findIndex(p => p.isPlayer);
+    const pos = playerIdx + 1;
+    const suffix = pos === 1 ? 'st' : pos === 2 ? 'nd' : pos === 3 ? 'rd' : 'th';
+
+    let raceEl = document.getElementById('race-position');
+    if (!raceEl) {
+      raceEl = document.createElement('div');
+      raceEl.id = 'race-position';
+      raceEl.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:11;pointer-events:none;text-align:center;color:#fff;text-shadow:0 2px 8px rgba(0,0,0,.6)';
+      document.body.appendChild(raceEl);
+    }
+    const posColor = pos === 1 ? '#4ade80' : pos === 2 ? '#fbbf24' : '#ff6b6b';
+    const roundText = `Round ${this.currentRound}/${this.totalRounds}`;
+    raceEl.innerHTML = `<div style="font-size:48px;font-weight:700;color:${posColor};line-height:1">${pos}${suffix}</div><div style="font-size:11px;opacity:.5;margin-top:2px">${roundText}</div><div style="font-size:12px;opacity:.6">${positions.map((p, i) => `${i + 1}. ${p.name}${p.finished ? ' ✓' : ''}`).join(' &middot; ')}</div>`;
+  }
+
+  startNextRound() {
+    // Pick new destination far from current position
+    const roads = this.city.getRoadPositions();
+    let bestDest = null;
+    let bestDist = 0;
+    for (let i = 0; i < 20; i++) {
+      const rp = roads[Math.floor(Math.random() * roads.length)];
+      const d = this.vehicle.position.distanceTo(rp);
+      if (d > bestDist) { bestDist = d; bestDest = rp.clone(); }
+    }
+    this.raceDestination = bestDest;
+    this.playerFinished = false;
+    this.playerFinishTime = 0;
+
+    // Move destination marker
+    if (this._destMarker) {
+      this._destMarker.position.set(this.raceDestination.x, 0, this.raceDestination.z);
+    }
+
+    // Reset rival racers — new destination, not finished
+    this.rivalAI.setDestination(this.raceDestination);
+    for (const r of this.rivalAI.getRivals()) {
+      r.finished = false;
+      r.finishTime = 0;
+      r.target = this.raceDestination.clone();
+      r.slowTimer = 0;
+    }
+
+    // Flash round announcement
+    this.showPassengerInfo(`ROUND ${this.currentRound} — GO!`);
+    setTimeout(() => this.hidePassengerInfo(), 2000);
+  }
+
   updateUI() {
     const min = Math.floor(this.timeLeft / 60);
     const sec = Math.floor(this.timeLeft % 60);
     this.ui.timer.textContent = `${min}:${sec.toString().padStart(2, '0')}`;
     this.ui.timer.className = this.timeLeft < 20 ? 'vl warn' : 'vl';
-    this.ui.score.textContent = `Rs. ${this.score}`;
-    this.ui.deliveries.textContent = `${this.deliveries}`;
-    this.ui.levelNum.textContent = this.level;
+    this.ui.score.textContent = `${this.score} pts`;
+    if (this.ui.deliveries) this.ui.deliveries.textContent = `R${this.currentRound || 1}`;
+    if (this.ui.levelNum) this.ui.levelNum.textContent = this.totalRounds || 3;
 
-    // Stars
-    const maxStars = this.deliveries * 3;
-    this.ui.starsEarned.textContent = maxStars > 0 ? `${'★'.repeat(this.totalStars)}${'☆'.repeat(maxStars - this.totalStars)}` : '';
+    // Health bar
+    const hb = document.getElementById('health-bar');
+    if (hb) hb.style.width = `${Math.max(0, this.health)}%`;
 
-    // Speedometer
-    const kmh = this.vehicle.getSpeedKmh();
-    this.ui.speedoValue.textContent = kmh;
-    this.ui.speedoBar.style.height = `${Math.min(kmh / 150 * 100, 100)}%`;
-
-    // Boost gauge
-    const boostPct = (this.vehicle.boostFuel / 2.5) * 100;
-    this.ui.boostBar.style.height = `${boostPct}%`;
-    this.ui.boostStatus.textContent = this.vehicle.boostCooldownTimer > 0 ? 'RECHARGING' : 'SHIFT';
-
-    // Fare meter
-    if (this.passengers.isCarrying()) {
-      this.ui.fareValue.textContent = `Rs. ${this.passengers.getFare()}`;
-    }
-
-    // Ammo dots
-    let dotsHtml = '';
-    for (let i = 0; i < this.projectiles.maxAmmo; i++) {
-      dotsHtml += `<div class="ammo-dot${i >= this.projectiles.ammo ? ' empty' : ''}"></div>`;
-    }
-    this.ui.ammoDots.innerHTML = dotsHtml;
-
-    // Crosshair visibility (show when moving fast)
+    // Crosshair visibility
     const fast = Math.abs(this.vehicle.speed) > 10;
-    this.ui.crosshair.classList.toggle('active', fast && this.projectiles.ammo > 0);
-  }
-
-  // --- Exhaust ---
-  updateExhaust(delta) {
-    const speed = Math.abs(this.vehicle.speed);
-    if (speed < 3) return;
-
-    this.exhaustTimer += delta;
-    const interval = speed > 30 ? 0.03 : 0.06;
-
-    if (this.exhaustTimer > interval) {
-      this.exhaustTimer = 0;
-      const rot = this.vehicle.rotation;
-      const pos = this.vehicle.position;
-
-      const puff = new THREE.Mesh(
-        new THREE.SphereGeometry(0.15 + Math.random() * 0.15, 4, 4),
-        new THREE.MeshBasicMaterial({
-          color: this.vehicle.boosting ? 0xff6600 : 0x888888,
-          transparent: true,
-          opacity: 0.3,
-        })
-      );
-
-      puff.position.set(
-        pos.x - Math.sin(rot) * 2.5 + (Math.random() - 0.5) * 0.3,
-        0.6 + Math.random() * 0.3,
-        pos.z - Math.cos(rot) * 2.5 + (Math.random() - 0.5) * 0.3
-      );
-      this.scene.add(puff);
-      this.exhaustParticles.push({ mesh: puff, life: 0.6 });
-    }
-
-    // Update existing puffs
-    for (let i = this.exhaustParticles.length - 1; i >= 0; i--) {
-      const p = this.exhaustParticles[i];
-      p.life -= delta;
-      p.mesh.position.y += delta * 1.5;
-      p.mesh.scale.multiplyScalar(1 + delta * 2);
-      p.mesh.material.opacity -= delta * 0.5;
-
-      if (p.life <= 0) {
-        this.scene.remove(p.mesh);
-        this.exhaustParticles.splice(i, 1);
-      }
-    }
-  }
-
-  // --- Drift ---
-  updateDrift(delta, input) {
-    const speed = Math.abs(this.vehicle.speed);
-    const turning = input.left || input.right;
-    const wasDrifting = this.isDrifting;
-
-    this.isDrifting = turning && speed > 22 && this.vehicle.gripMultiplier < 1;
-    // Also count as drift at very high speed turns even without rain
-    if (!this.isDrifting) {
-      this.isDrifting = turning && speed > 35;
-    }
-
-    if (this.isDrifting) {
-      this.driftTimer += delta;
-      this.driftScore += Math.floor(speed * delta * 2);
-      // Drift sparks
-      this.driftSparkTimer += delta;
-      if (this.driftSparkTimer > 0.04) {
-        this.driftSparkTimer = 0;
-        this.effects.spawnSparks(this.vehicle.position, this.vehicle.rotation);
-      }
-      // Tire marks
-      this.tireMarkTimer += delta;
-      if (this.tireMarkTimer > 0.08) {
-        this.tireMarkTimer = 0;
-        this.effects.spawnTireMark(this.vehicle.position, this.vehicle.rotation);
-      }
-    } else if (wasDrifting && this.driftTimer > 0.8) {
-      // Cash in drift
-      const bonus = Math.min(this.driftScore, 200);
-      this.score += bonus;
-      this.showPassengerInfo(`DRIFT! +Rs. ${bonus}`);
-      setTimeout(() => this.hidePassengerInfo(), 1500);
-      this.driftTimer = 0;
-      this.driftScore = 0;
-    } else {
-      this.driftTimer = 0;
-      this.driftScore = 0;
-    }
-  }
-
-  // --- Time Bonus Pickups ---
-  updateTimeBonuses(delta) {
-    this.timeBonusSpawnTimer -= delta;
-    if (this.timeBonusSpawnTimer <= 0) {
-      this.timeBonusSpawnTimer = 10 + Math.random() * 15;
-      this.spawnTimeBonus();
-    }
-
-    const vPos = this.vehicle.position;
-    for (let i = this.timeBonuses.length - 1; i >= 0; i--) {
-      const tb = this.timeBonuses[i];
-      tb.life -= delta;
-
-      // Animate
-      tb.mesh.position.y = 2 + Math.sin(performance.now() * 0.005 + i) * 0.5;
-      tb.mesh.rotation.y += delta * 2;
-
-      // Collect
-      const dx = vPos.x - tb.position.x;
-      const dz = vPos.z - tb.position.z;
-      if (Math.sqrt(dx * dx + dz * dz) < 4) {
-        this.timeLeft = Math.min(this.timeLeft + tb.seconds, GAME.totalTime);
-        this.showPassengerInfo(`+${tb.seconds}s TIME BONUS!`);
-        this.music.playPickup();
-        setTimeout(() => this.hidePassengerInfo(), 1500);
-        this.scene.remove(tb.mesh);
-        this.timeBonuses.splice(i, 1);
-        continue;
-      }
-
-      // Expire
-      if (tb.life <= 0) {
-        this.scene.remove(tb.mesh);
-        this.timeBonuses.splice(i, 1);
-      }
-    }
-  }
-
-  spawnTimeBonus() {
-    const roads = this.city.getRoadPositions();
-    const rp = roads[Math.floor(Math.random() * roads.length)];
-
-    const group = new THREE.Group();
-    // Clock-like icon: torus + hands
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(0.8, 0.15, 8, 16),
-      new THREE.MeshBasicMaterial({ color: 0x22d3ee })
-    );
-    ring.rotation.x = Math.PI / 2;
-    group.add(ring);
-
-    const center = new THREE.Mesh(
-      new THREE.SphereGeometry(0.15, 6, 6),
-      new THREE.MeshBasicMaterial({ color: 0x22d3ee })
-    );
-    group.add(center);
-
-    // Plus sign
-    const barH = new THREE.Mesh(
-      new THREE.BoxGeometry(0.6, 0.12, 0.12),
-      new THREE.MeshBasicMaterial({ color: 0xffffff })
-    );
-    group.add(barH);
-    const barV = new THREE.Mesh(
-      new THREE.BoxGeometry(0.12, 0.6, 0.12),
-      new THREE.MeshBasicMaterial({ color: 0xffffff })
-    );
-    group.add(barV);
-
-    // Glow ring on ground
-    const glow = new THREE.Mesh(
-      new THREE.RingGeometry(1.5, 2.2, 16),
-      new THREE.MeshBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.15, side: THREE.DoubleSide })
-    );
-    glow.rotation.x = -Math.PI / 2;
-    glow.position.y = -1.8;
-    group.add(glow);
-
-    group.position.set(rp.x, 2, rp.z);
-    this.scene.add(group);
-
-    const seconds = [5, 8, 10][Math.floor(Math.random() * 3)];
-    this.timeBonuses.push({
-      position: rp.clone(),
-      mesh: group,
-      seconds,
-      life: 20,
-    });
+    this.ui.crosshair.classList.toggle('active', fast);
   }
 
   // --- Fullscreen map toggle ---
@@ -1339,7 +1254,7 @@ export class Game {
     // Road center lines
     ctx.strokeStyle = 'rgba(255,255,255,.06)';
     ctx.lineWidth = 0.5;
-    for (let i = 0; i < GRID_SIZE; i += 3) {
+    for (let i = 0; i < GRID_SIZE; i += 2) {
       const p = i * CELL_SIZE * s + CELL_SIZE * s / 2;
       ctx.beginPath(); ctx.moveTo(p, 0); ctx.lineTo(p, H); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(0, p); ctx.lineTo(W, p); ctx.stroke();
@@ -1374,12 +1289,18 @@ export class Game {
       ctx.fill();
     }
 
-    // Time bonuses
-    ctx.fillStyle = '#22d3ee';
-    for (const tb of this.timeBonuses) {
+    // Police
+    if (this.police.isActive()) {
+      const flash = Math.sin(performance.now() * 0.008) > 0;
+      ctx.fillStyle = flash ? '#ff0000' : '#0044ff';
       ctx.beginPath();
-      ctx.arc(tb.position.x * s, tb.position.z * s, 4, 0, Math.PI * 2);
+      ctx.arc(this.police.position.x * s, this.police.position.z * s, 6, 0, Math.PI * 2);
       ctx.fill();
+      ctx.strokeStyle = flash ? 'rgba(255,0,0,.4)' : 'rgba(0,68,255,.4)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(this.police.position.x * s, this.police.position.z * s, 10, 0, Math.PI * 2);
+      ctx.stroke();
     }
 
     // Trail
@@ -1394,14 +1315,27 @@ export class Game {
       ctx.stroke();
     }
 
-    // Objectives
-    const pickup = this.passengers.getPickupPosition();
-    const dropoff = this.passengers.getDropoffPosition();
-    if (pickup) {
-      this.drawMapMarker(ctx, pickup.x * s, pickup.z * s, '#ffd700', 'PICKUP');
+    // Race destination
+    if (this.raceDestination) {
+      this.drawMapMarker(ctx, this.raceDestination.x * s, this.raceDestination.z * s, '#4ade80', 'FINISH');
     }
-    if (dropoff) {
-      this.drawMapMarker(ctx, dropoff.x * s, dropoff.z * s, '#4ade80', 'DELIVER');
+
+    // Rival racers on fullmap
+    const fmRivalColors = ['#cc3333', '#cc8800', '#8833cc'];
+    const fmRivalNames = ['RED', 'GOLD', 'PURPLE'];
+    for (let i = 0; i < this.rivalAI.getRivals().length; i++) {
+      const r = this.rivalAI.getRivals()[i];
+      ctx.fillStyle = fmRivalColors[i % fmRivalColors.length];
+      ctx.beginPath();
+      ctx.arc(r.position.x * s, r.position.z * s, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 9px Rajdhani';
+      ctx.textAlign = 'center';
+      ctx.fillText(fmRivalNames[i], r.position.x * s, r.position.z * s - 10);
     }
 
     // Player
@@ -1409,7 +1343,7 @@ export class Game {
     const rot = this.vehicle.rotation;
     ctx.save();
     ctx.translate(pos.x * s, pos.z * s);
-    ctx.rotate(-rot);
+    ctx.rotate(Math.PI - rot);
     ctx.fillStyle = '#ff4444';
     ctx.beginPath();
     ctx.moveTo(0, -8);
@@ -1477,7 +1411,7 @@ export class Game {
     // Rotate around player (player always faces up)
     ctx.save();
     ctx.translate(cx, cy);
-    ctx.rotate(pRot);
+    ctx.rotate(pRot + Math.PI);
 
     // Helper: world to minimap coords
     const wx = (worldX) => (worldX - pPos.x) * s;
@@ -1539,16 +1473,51 @@ export class Game {
       ctx.fill();
     }
 
-    // Time bonuses
-    ctx.fillStyle = '#22d3ee';
-    for (const tb of this.timeBonuses) {
-      const bx = wx(tb.position.x);
-      const bz = wz(tb.position.z);
-      if (Math.abs(bx) > cx || Math.abs(bz) > cy) continue;
-      const pulse = 2.5 + Math.sin(time + tb.life) * 0.8;
+    // Police (flashing red/blue blip)
+    if (this.police.isActive()) {
+      const px = wx(this.police.position.x);
+      const pz = wz(this.police.position.z);
+      if (Math.abs(px) <= cx && Math.abs(pz) <= cy) {
+        const flash = Math.sin(time * 8) > 0;
+        ctx.fillStyle = flash ? '#ff0000' : '#0044ff';
+        ctx.beginPath();
+        ctx.arc(px, pz, 4, 0, Math.PI * 2);
+        ctx.fill();
+        // Pulse ring
+        const pulse = 6 + Math.sin(time * 4) * 2;
+        ctx.strokeStyle = flash ? 'rgba(255,0,0,.3)' : 'rgba(0,68,255,.3)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(px, pz, pulse, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    // Rival racers on minimap
+    const rivalColors = ['#cc3333', '#cc8800', '#8833cc'];
+    for (let i = 0; i < this.rivalAI.getRivals().length; i++) {
+      const r = this.rivalAI.getRivals()[i];
+      const rx = wx(r.position.x);
+      const rz = wz(r.position.z);
+      if (Math.abs(rx) > cx + 5 || Math.abs(rz) > cy + 5) continue;
+      ctx.fillStyle = rivalColors[i % rivalColors.length];
       ctx.beginPath();
-      ctx.arc(bx, bz, pulse, 0, Math.PI * 2);
+      ctx.arc(rx, rz, 4, 0, Math.PI * 2);
       ctx.fill();
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+    }
+
+    // Race destination on minimap
+    if (this.raceDestination) {
+      const fx = wx(this.raceDestination.x);
+      const fz = wz(this.raceDestination.z);
+      const pulse = 5 + Math.sin(time * 3) * 2;
+      ctx.fillStyle = 'rgba(74,222,128,.2)';
+      ctx.beginPath(); ctx.arc(fx, fz, pulse + 3, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#4ade80';
+      ctx.beginPath(); ctx.arc(fx, fz, 4, 0, Math.PI * 2); ctx.fill();
     }
 
     // Trail
@@ -1563,27 +1532,7 @@ export class Game {
       ctx.stroke();
     }
 
-    // Passenger markers
-    const pickup = this.passengers.getPickupPosition();
-    const dropoff = this.passengers.getDropoffPosition();
-    if (pickup) {
-      const px = wx(pickup.x);
-      const pz = wz(pickup.z);
-      const pulse = 4 + Math.sin(time * 2) * 1.5;
-      ctx.fillStyle = 'rgba(255,215,0,.15)';
-      ctx.beginPath(); ctx.arc(px, pz, pulse + 3, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#ffd700';
-      ctx.beginPath(); ctx.arc(px, pz, 4, 0, Math.PI * 2); ctx.fill();
-    }
-    if (dropoff) {
-      const dx = wx(dropoff.x);
-      const dz = wz(dropoff.z);
-      const pulse = 4 + Math.sin(time * 2 + 1) * 1.5;
-      ctx.fillStyle = 'rgba(74,222,128,.15)';
-      ctx.beginPath(); ctx.arc(dx, dz, pulse + 3, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#4ade80';
-      ctx.beginPath(); ctx.arc(dx, dz, 4, 0, Math.PI * 2); ctx.fill();
-    }
+    // Race destination on minimap (already added above with rivals)
 
     ctx.restore(); // end rotation
 
@@ -1627,11 +1576,10 @@ export class Game {
     ctx.textBaseline = 'middle';
     ctx.fillText('N', nX, nY);
 
-    // Distance to objective
-    const target = dropoff || pickup;
-    if (target) {
+    // Distance to finish
+    if (this.raceDestination) {
       const dist = Math.round(Math.sqrt(
-        (pPos.x - target.x) ** 2 + (pPos.z - target.z) ** 2
+        (pPos.x - this.raceDestination.x) ** 2 + (pPos.z - this.raceDestination.z) ** 2
       ));
       this.ui.minimapDist.textContent = `${dist}m`;
     } else {
@@ -1658,8 +1606,8 @@ export class Game {
 
   showDialogue(type) {
     const text = this.getDialogue(type);
-    if (text) this.showPassengerInfo(text);
-    if (type !== 'pickup' && type !== 'delivery') {
+    if (text) {
+      this.showPassengerInfo(text);
       setTimeout(() => this.hidePassengerInfo(), 2000);
     }
   }
@@ -1682,271 +1630,48 @@ export class Game {
     el.style.animation = 'violationTextAnim 1.2s ease-out forwards';
   }
 
-  showStarRating(stars) {
-    const el = this.ui.starPopup;
-    el.textContent = stars > 0 ? '★'.repeat(stars) + '☆'.repeat(3 - stars) : '☆☆☆';
-    el.style.color = stars >= 3 ? '#fbbf24' : stars >= 2 ? '#fb923c' : '#ef4444';
+  showPoliceFine(amount) {
+    this.ui.violationFlash.classList.remove('active');
+    this.ui.violationFlash.offsetHeight;
+    this.ui.violationFlash.classList.add('active');
+
+    const el = this.ui.violationText;
+    el.textContent = `BUSTED! -Rs. ${amount}`;
     el.style.animation = 'none';
     el.offsetHeight;
-    el.style.animation = 'starAnim 1.5s ease-out forwards';
+    el.style.animation = 'violationTextAnim 1.2s ease-out forwards';
   }
 
-  // --- Speed Trail ---
-  updateSpeedTrail() {
-    const speed = Math.abs(this.vehicle.speed);
-    const pos = this.vehicle.position;
-    const rot = this.vehicle.rotation;
 
-    // Add new trail point at vehicle rear
-    const i = this.trailIndex % this.trailLength;
-    this.trailPositions[i * 3] = pos.x - Math.sin(rot) * 2.5;
-    this.trailPositions[i * 3 + 1] = 0.5;
-    this.trailPositions[i * 3 + 2] = pos.z - Math.cos(rot) * 2.5;
-    this.glowTrailPositions[i * 3] = this.trailPositions[i * 3];
-    this.glowTrailPositions[i * 3 + 1] = 0.5;
-    this.glowTrailPositions[i * 3 + 2] = this.trailPositions[i * 3 + 2];
-    this.trailIndex++;
-
-    // Visibility based on speed
-    const showTrail = speed > 15;
-    this.speedTrail.visible = showTrail;
-    this.glowTrail.visible = showTrail;
-
-    if (showTrail) {
-      const intensity = Math.min((speed - 15) / 30, 1);
-      this.speedTrail.material.opacity = 0.4 * intensity;
-      this.glowTrail.material.opacity = 0.2 * intensity;
-      this.glowTrail.material.size = 0.8 + intensity * 1.5;
-
-      // Color shifts with boost
-      if (this.vehicle.boosting) {
-        this.speedTrail.material.color.setHex(0xff6600);
-        this.glowTrail.material.color.setHex(0xff8800);
-      } else {
-        this.speedTrail.material.color.setHex(0x22d3ee);
-        this.glowTrail.material.color.setHex(0x4ade80);
-      }
-    }
-
-    this.speedTrail.geometry.attributes.position.needsUpdate = true;
-    this.glowTrail.geometry.attributes.position.needsUpdate = true;
-  }
-
-  // --- Pigeon Scatter ---
-  updatePigeonScatter(delta) {
-    const vPos = this.vehicle.position;
-    const speed = Math.abs(this.vehicle.speed);
-    if (speed < 5) return;
-
-    for (const group of this.city.pigeonGroups) {
-      const dx = vPos.x - group.position.x;
-      const dz = vPos.z - group.position.z;
-      const dist = dx * dx + dz * dz;
-
-      if (dist < 64 && !group.scattered) {
-        group.scattered = true;
-        group.scatterTimer = 3;
-        for (const pigeon of group.meshes) {
-          pigeon.userData.scatterVY = 3 + Math.random() * 4;
-          pigeon.userData.scatterVX = (Math.random() - 0.5) * 6;
-          pigeon.userData.scatterVZ = (Math.random() - 0.5) * 6;
-          pigeon.userData.scatterSpin = (Math.random() - 0.5) * 8;
-        }
-      }
-
-      if (group.scattered) {
-        group.scatterTimer -= delta;
-        for (const pigeon of group.meshes) {
-          if (pigeon.userData.scatterVY !== undefined) {
-            pigeon.position.x += pigeon.userData.scatterVX * delta;
-            pigeon.position.y += pigeon.userData.scatterVY * delta;
-            pigeon.position.z += pigeon.userData.scatterVZ * delta;
-            pigeon.rotation.z += pigeon.userData.scatterSpin * delta;
-            pigeon.userData.scatterVY -= 3 * delta;
-          }
-        }
-        // Reset after timer
-        if (group.scatterTimer <= 0) {
-          group.scattered = false;
-          for (const pigeon of group.meshes) {
-            // Return to ground near original position
-            const angle = Math.random() * Math.PI * 2;
-            const r = Math.random() * 3;
-            pigeon.position.set(
-              group.position.x + Math.cos(angle) * r,
-              0,
-              group.position.z + Math.sin(angle) * r
-            );
-            pigeon.rotation.z = 0;
-            pigeon.rotation.y = Math.random() * Math.PI * 2;
-            delete pigeon.userData.scatterVY;
-            delete pigeon.userData.scatterVX;
-            delete pigeon.userData.scatterVZ;
-            delete pigeon.userData.scatterSpin;
-          }
-        }
-      }
-    }
-  }
-
-  // --- Dynamic Events ---
-  updateDynamicEvents(delta) {
-    this.dynamicEventTimer -= delta;
-    if (this.dynamicEventTimer <= 0) {
-      this.dynamicEventTimer = 25 + Math.random() * 20;
-      this.spawnDynamicEvent();
-    }
-
-    // Update active events
-    for (let i = this.activeEvents.length - 1; i >= 0; i--) {
-      const ev = this.activeEvents[i];
-      ev.life -= delta;
-
-      if (ev.type === 'procession') {
-        for (const npc of ev.meshes) {
-          npc.position.x += ev.dirX * 2 * delta;
-          npc.position.z += ev.dirZ * 2 * delta;
-          npc.children[0].position.y = 1 + Math.sin(performance.now() * 0.005 + npc.userData.phase) * 0.15;
-        }
-      } else if (ev.type === 'sitting_cow') {
-        ev.meshes[0].children[0].rotation.y = Math.sin(performance.now() * 0.001) * 0.1;
-      }
-
-      // Collision with player
-      const vPos = this.vehicle.position;
-      const vSpeed = Math.abs(this.vehicle.speed);
-      if (vSpeed > 3 && !ev._hitCooldown) {
-        for (const mesh of ev.meshes) {
-          const dx = vPos.x - mesh.position.x;
-          const dz = vPos.z - mesh.position.z;
-          const dist = Math.sqrt(dx * dx + dz * dz);
-          const hitRadius = ev.type === 'sitting_cow' ? 2.5 : 1.5;
-          if (dist < hitRadius) {
-            // Push player back
-            if (dist > 0.01) {
-              vPos.x += (dx / dist) * (hitRadius - dist) * 0.5;
-              vPos.z += (dz / dist) * (hitRadius - dist) * 0.5;
-            }
-            this.vehicle.speed *= 0.3;
-            this.shakeIntensity = 0.3;
-            this.effects.spawnDebris(mesh.position);
-            ev._hitCooldown = 1.5;
-
-            // Type-specific sounds
-            if (ev.type === 'sitting_cow') {
-              if (this.music.playMoo) this.music.playMoo();
-            } else if (ev.type === 'procession') {
-              if (this.music.playAiyaa) this.music.playAiyaa();
-            } else {
-              if (this.music.playSoftCrash) this.music.playSoftCrash();
-            }
-            break;
-          }
-        }
-      }
-      if (ev._hitCooldown > 0) ev._hitCooldown -= delta;
-
-      if (ev.life <= 0) {
-        for (const m of ev.meshes) this.scene.remove(m);
-        this.activeEvents.splice(i, 1);
-      }
-    }
-  }
-
-  spawnDynamicEvent() {
-    const roads = this.city.getRoadPositions();
-    const rp = roads[Math.floor(Math.random() * roads.length)];
-    const eventType = Math.random();
-
-    if (eventType < 0.4) {
-      // Festival procession - line of 6 NPCs with colorful outfits walking across a road
-      const meshes = [];
-      const isHoriz = Math.random() > 0.5;
-      const dirX = isHoriz ? (Math.random() > 0.5 ? 1 : -1) : 0;
-      const dirZ = isHoriz ? 0 : (Math.random() > 0.5 ? 1 : -1);
-      const colors = [0xff4444, 0xff8800, 0xffcc00, 0x44ff44, 0x4488ff, 0xff44ff];
-
-      for (let i = 0; i < 6; i++) {
-        const g = new THREE.Group();
-        const body = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.3, 0.4, 1.2, 6),
-          new THREE.MeshLambertMaterial({ color: colors[i % colors.length] })
-        );
-        body.position.y = 1;
-        g.add(body);
-        const head = new THREE.Mesh(
-          new THREE.SphereGeometry(0.2, 6, 6),
-          new THREE.MeshLambertMaterial({ color: 0xc68642 })
-        );
-        head.position.y = 1.8;
-        g.add(head);
-        g.position.set(
-          rp.x + (isHoriz ? -i * 1.5 * dirX : (Math.random() - 0.5) * 2),
-          0,
-          rp.z + (isHoriz ? (Math.random() - 0.5) * 2 : -i * 1.5 * dirZ)
-        );
-        g.userData.phase = i * 0.5;
-        this.scene.add(g);
-        meshes.push(g);
-      }
-
-      this.activeEvents.push({ type: 'procession', meshes, dirX, dirZ, life: 15 });
-      this.showPassengerInfo('Festival procession! Watch out!');
-      setTimeout(() => this.hidePassengerInfo(), 2000);
-    } else if (eventType < 0.7) {
-      // Sitting cow in the middle of the road
-      const g = new THREE.Group();
-      const body = new THREE.Mesh(
-        new THREE.BoxGeometry(1.4, 0.8, 2),
-        new THREE.MeshLambertMaterial({ color: 0xd2b48c })
-      );
-      body.position.y = 0.4;
-      g.add(body);
-      const head = new THREE.Mesh(
-        new THREE.BoxGeometry(0.6, 0.5, 0.6),
-        new THREE.MeshLambertMaterial({ color: 0xd2b48c })
-      );
-      head.position.set(0, 0.6, 1.2);
-      g.add(head);
-      g.position.set(rp.x, 0, rp.z);
-      this.scene.add(g);
-
-      this.activeEvents.push({ type: 'sitting_cow', meshes: [g], life: 20 });
-      this.showPassengerInfo('Cow blocking the road! Go around!');
-      setTimeout(() => this.hidePassengerInfo(), 2000);
-    } else {
-      // Motorcycle rally - 8 fast motorcycles zooming past
-      const meshes = [];
-      const dir = Math.random() > 0.5 ? 1 : -1;
-      for (let i = 0; i < 8; i++) {
-        const bike = new THREE.Mesh(
-          new THREE.BoxGeometry(0.5, 0.8, 1.2),
-          new THREE.MeshLambertMaterial({ color: 0x222222 + Math.floor(Math.random() * 0x333333) })
-        );
-        bike.position.set(
-          rp.x + (Math.random() - 0.5) * 4 - dir * i * 3,
-          0.5,
-          rp.z + (Math.random() - 0.5) * 3
-        );
-        const rider = new THREE.Mesh(
-          new THREE.BoxGeometry(0.35, 0.6, 0.35),
-          new THREE.MeshLambertMaterial({ color: 0x444444 })
-        );
-        rider.position.y = 0.7;
-        bike.add(rider);
-        this.scene.add(bike);
-        meshes.push(bike);
-      }
-
-      this.activeEvents.push({
-        type: 'procession', meshes, dirX: dir, dirZ: 0, life: 8,
-      });
+  // --- Power Cut ---
+  updatePowerCut(delta) {
+    if (this.trafficLights.isPowerCut()) return;
+    this.powerCutCooldown -= delta;
+    if (this.powerCutCooldown <= 0) {
+      this.powerCutCooldown = 40 + Math.random() * 30;
+      const duration = 10 + Math.random() * 8;
+      this.trafficLights.startPowerCut(duration);
+      this.showDialogue('powerCut');
+      this.showPassengerInfo('LOAD SHEDDING! Traffic lights are out!');
+      setTimeout(() => this.hidePassengerInfo(), 2500);
     }
   }
 
   // --- Game Over ---
   gameOver() {
-    this.state = 'gameover';
+    if (this._gameOverPending) return;
+    this._gameOverPending = true;
+    // Brief slow-mo, then transition
+    this.timeScale = 0.3;
+    setTimeout(() => {
+      this.timeScale = 1;
+      this._gameOverPending = false;
+      this.setState(STATE.GAMEOVER);
+      this._showGameOver();
+    }, 800);
+  }
+
+  _showGameOver() {
     this.music.stop();
 
     // High score (solo only)
@@ -1956,7 +1681,7 @@ export class Game {
         localStorage.setItem('rickshaw-rush-hs', this.score.toString());
       }
       // Top 5 scores
-      this.topScores.push({ score: this.score, deliveries: this.deliveries, level: this.level, date: new Date().toLocaleDateString() });
+      this.topScores.push({ score: this.score, date: new Date().toLocaleDateString() });
       this.topScores.sort((a, b) => b.score - a.score);
       this.topScores = this.topScores.slice(0, 5);
       localStorage.setItem('rickshaw-rush-top5', JSON.stringify(this.topScores));
@@ -1968,25 +1693,18 @@ export class Game {
     this.ui.minimap.style.display = 'none';
     this.ui.speedo.style.display = 'none';
     this.ui.boostWrap.style.display = 'none';
-    this.ui.farePanel.style.display = 'none';
-    this.ui.ammoWrap.style.display = 'none';
     this.ui.crosshair.classList.remove('active');
     this.ui.comboDisplay.classList.remove('visible');
-    this.ui.rainOverlay.classList.remove('active');
     this.hidePassengerInfo();
 
     const mpSb = document.getElementById('mp-scoreboard');
     if (mpSb) mpSb.style.display = 'none';
 
     // Cleanup
+    this.police.reset();
     this.projectiles.reset();
     this.effects.cleanup();
-    for (const ev of this.activeEvents) {
-      for (const m of ev.meshes) this.scene.remove(m);
-    }
-    this.activeEvents = [];
-    for (const p of this.exhaustParticles) this.scene.remove(p.mesh);
-    this.exhaustParticles = [];
+    this.trafficLights.endPowerCut();
 
     // Clean remote players
     for (const rp of Object.values(this.remotePlayers)) rp.destroy();
@@ -1996,16 +1714,14 @@ export class Game {
       // --- Online multiplayer game over ---
       const myName = this.network?.players.find(p => p.id === this.network?.playerId)?.name || 'You';
       const allScores = [
-        { name: myName, score: this.score, dels: this.deliveries, stars: this.totalStars, me: true },
-        ...Object.values(this.remoteScores).map(s => ({
-          name: s.name, score: s.score, dels: s.deliveries, stars: 0, me: false,
-        })),
+        { name: myName, score: this.score, me: true },
+        ...Object.values(this.remoteScores).map(s => ({ name: s.name, score: s.score, me: false })),
       ].sort((a, b) => b.score - a.score);
 
       const leaderboard = allScores.map((s, i) => {
         const medal = i === 0 ? '&#x1F451;' : '';
         const style = s.me ? 'color:#4ade80;font-weight:700' : 'opacity:.7';
-        return `<div style="${style};font-size:18px;line-height:2">${medal} ${i + 1}. ${s.name} -- Rs. ${s.score} (${s.dels} deliveries)</div>`;
+        return `<div style="${style};font-size:18px;line-height:2">${medal} ${i + 1}. ${s.name} — ${s.score} pts</div>`;
       }).join('');
 
       const iWon = allScores[0]?.me;
@@ -2018,18 +1734,14 @@ export class Game {
 
       this.network?.disconnect();
     } else {
-      // --- Solo game over ---
-      const avgReward = this.deliveries > 0 ? Math.round(this.score / this.deliveries) : 0;
-      const maxStars = this.deliveries * 3;
+      // --- Solo race game over ---
       const isNewHigh = this.score >= this.highScore && this.score > 0;
 
       const achievements = [];
-      if (this.deliveries >= 5) achievements.push('Busy Driver');
-      if (this.deliveries >= 10) achievements.push('Road Warrior');
       if (this.nearMisses >= 5) achievements.push('Close Caller');
-      if (this.totalStars >= 9) achievements.push('Star Collector');
-      if (this.violations === 0 && this.deliveries > 0) achievements.push('Law Abiding');
-      if (this.level >= 4) achievements.push('Level Boss');
+      if (this.score >= 1000) achievements.push('Rs. 1000 Club');
+      if (this.fines === 0 && this.violations === 0) achievements.push('Clean Record');
+      if (this.score >= 1500) achievements.push('Kathmandu Legend');
 
       const achHtml = achievements.length > 0
         ? `<div class="overlay-achievements">${achievements.map(a =>
@@ -2041,27 +1753,46 @@ export class Game {
         ? `<div style="margin-top:12px;font-size:13px;opacity:.5">
             <div style="margin-bottom:4px;letter-spacing:1px;text-transform:uppercase;font-size:10px;opacity:.6">TOP SCORES</div>
             ${this.topScores.map((s, i) =>
-              `<div style="${s.score === this.score && s.deliveries === this.deliveries ? 'color:#4ade80' : ''}">${i + 1}. Rs. ${s.score} - Lv.${s.level} (${s.deliveries} del)</div>`
+              `<div style="${s.score === this.score ? 'color:#4ade80' : ''}">${i + 1}. ${s.score} pts &middot; ${s.date}</div>`
             ).join('')}
           </div>`
         : '';
 
       this.ui.overlay.innerHTML = `
-        <h1>${isNewHigh ? 'NEW HIGH SCORE!' : "TIME'S UP!"}</h1>
-        <div class="overlay-final-score">Rs. ${this.score}</div>
+        <h1>${this.policeCaught ? 'BUSTED!' : isNewHigh ? 'NEW HIGH SCORE!' : "TIME'S UP!"}</h1>
+        ${this.policeCaught ? '<div style="font-size:16px;color:#ff6b6b;margin-bottom:8px">Caught by police — Rs. 500 fine deducted</div>' : ''}
+        <div class="overlay-final-score">${this.score} pts</div>
         <div class="overlay-stats">
-          Level reached: ${this.level}<br>
-          Deliveries: ${this.deliveries}<br>
-          Stars: ${'★'.repeat(this.totalStars)}${'☆'.repeat(Math.max(0, maxStars - this.totalStars))} (${this.totalStars}/${maxStars})<br>
+          Rounds: ${Math.min(this.currentRound - 1, this.totalRounds)} / ${this.totalRounds}<br>
           Near misses: ${this.nearMisses}<br>
           Violations: ${this.violations} (Fines: Rs. ${this.fines})<br>
-          Avg per delivery: Rs. ${avgReward}
+          Best score: ${this.highScore} pts
         </div>
         ${top5Html}
         ${achHtml}
         <br>
-        <div class="overlay-prompt">Press ENTER or tap SOLO to play again</div>
+        <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:16px">
+          <div id="btn-play-again" class="menu-btn" style="border-color:#4ade80;background:rgba(74,222,128,.1);pointer-events:auto">PLAY AGAIN (R)</div>
+          <div id="btn-exit-gameover" class="menu-btn" style="border-color:#ff6b6b;background:rgba(255,107,107,.1);pointer-events:auto">EXIT TO MENU</div>
+          <div id="btn-share" class="menu-btn" style="border-color:#22d3ee;background:rgba(34,211,238,.1);pointer-events:auto">SHARE</div>
+        </div>
       `;
+
+      // Attach game over button handlers
+      setTimeout(() => {
+        document.getElementById('btn-play-again')?.addEventListener('click', () => {
+          this.setMode('single');
+          this.handleStart();
+        });
+        document.getElementById('btn-exit-gameover')?.addEventListener('click', () => {
+          this.returnToMenu();
+        });
+        document.getElementById('btn-share')?.addEventListener('click', () => {
+          const text = `I scored ${this.score} pts in Rickshaw Rush! Race through Kathmandu! 🛺\n\nCan you beat me? #RickshawRush #vibejam`;
+          const url = window.location.href;
+          window.open(`https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`, '_blank');
+        });
+      }, 100);
     }
 
     this.ui.overlay.classList.remove('hidden');
