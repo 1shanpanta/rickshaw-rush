@@ -116,10 +116,6 @@ export class Network {
     this.socket?.emit('balloon', data);
   }
 
-  sendGameOver() {
-    this.socket?.emit('game-over');
-  }
-
   syncTime() {
     if (!this.socket || !this.connected) return;
     const clientTime = Date.now();
@@ -133,15 +129,6 @@ export class Network {
 
   getServerTime() {
     return Date.now() + this.serverTimeOffset;
-  }
-
-  getRemoteStates() {
-    return this.stateBuffer;
-  }
-
-  getMyColor() {
-    const me = this.players.find(p => p.id === this.playerId);
-    return me?.color || 0x22a55b;
   }
 
   disconnect() {

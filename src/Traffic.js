@@ -401,17 +401,6 @@ export class Traffic {
     this.rebuildSpatialHash();
   }
 
-  addMore(extra) {
-    const rng = this.seededRandom(Date.now());
-    const roads = this.city.getRoadPositions();
-    const types = ['motorcycle', 'car', 'bus'];
-    for (let i = 0; i < extra; i++) {
-      const type = types[Math.floor(rng() * types.length)];
-      const rp = roads[Math.floor(rng() * roads.length)];
-      this.spawnNPC(type, rp.x + (rng() - 0.5) * 8, rp.z + (rng() - 0.5) * 8, rng);
-    }
-  }
-
   findNearestRoad(position) {
     const gx = Math.round(Math.floor(position.x / CELL_SIZE) / 3) * 3;
     const gz = Math.round(Math.floor(position.z / CELL_SIZE) / 3) * 3;

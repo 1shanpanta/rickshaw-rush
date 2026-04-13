@@ -71,8 +71,6 @@ export class Game {
     this.camIdeal = new THREE.Vector3();
     this.camLookTarget = new THREE.Vector3();
 
-    // Weather (particles only — no rain logic)
-    this.rainParticles = null;
     this.dustParticles = null;
 
     // Red light tracking
@@ -94,7 +92,6 @@ export class Game {
     this.powerCutCooldown = 45;
 
     // Nepali dialogues
-    this.dialogueTimer = 0;
     this.dialogues = {
       crash: [
         'Ke garnu bhayo dai!?',
@@ -114,11 +111,6 @@ export class Game {
         'Signal red chha dai!',
         'Traffic le samatyo!',
         'Fine tirnu paryo!',
-      ],
-      rain: [
-        'Pani paryo! Bistarai!',
-        'Monsoon aayo!',
-        'Chhata lyaunu parne!',
       ],
       policeChase: [
         'Police aayo! Bhaga!',
@@ -142,21 +134,10 @@ export class Game {
         'Load shedding aayo!',
         'Andhyaro bhayo!',
       ],
-      construction: [
-        'Bato banda chha!',
-        'Construction zone! Arko bato lau!',
-        'Road block! Ghumera jau!',
-      ],
-      festival: [
-        'Dashain aayo! Badhai chha!',
-        'Tihar ko ramailo!',
-        'Deusi re bhailo!',
-      ],
     };
 
     // Map selection (set before start via setMap)
     this.selectedMap = 'kathmandu';
-    this._currentMap = 'kathmandu';
 
     // Systems
     this.city = new City(scene, this.selectedMap);
@@ -172,7 +153,6 @@ export class Game {
 
     // Particles
     this.createDustParticles();
-    this.createRainParticles();
 
     // UI refs
     this.ui = {
@@ -184,26 +164,17 @@ export class Game {
       overlay: document.getElementById('screen-overlay'),
       passengerInfo: document.getElementById('passenger-info'),
       passengerText: document.getElementById('passenger-text'),
-      comboDisplay: document.getElementById('combo-display'),
       nearMiss: document.getElementById('near-miss'),
       speedLines: document.getElementById('speed-lines'),
       controlsHint: document.getElementById('controls-hint'),
       minimap: document.getElementById('minimap'),
-      speedoValue: document.getElementById('speedo-value'),
-      speedo: document.getElementById('speedo'),
-      boostBar: document.getElementById('boost-bar'),
       boostWrap: document.getElementById('boost-wrap'),
-      boostStatus: document.getElementById('boost-status'),
       violationFlash: document.getElementById('violation-flash'),
       violationText: document.getElementById('violation-text'),
-      levelUp: document.getElementById('level-up'),
-      starPopup: document.getElementById('star-popup'),
-      rainOverlay: document.getElementById('rain-overlay'),
       crosshair: document.getElementById('crosshair'),
       slowmoVignette: document.getElementById('slowmo-vignette'),
       photoModeEl: document.getElementById('photo-mode'),
       policeWarning: document.getElementById('police-warning'),
-      festivalBanner: document.getElementById('festival-banner'),
       powercutOverlay: document.getElementById('powercut-overlay'),
     };
 
@@ -243,24 +214,6 @@ export class Game {
       new THREE.PointsMaterial({ color: 0xccbb99, size: 0.3, transparent: true, opacity: 0.15 })
     );
     this.scene.add(this.dustParticles);
-  }
-
-  createRainParticles() {
-    const count = 4000;
-    const geo = new THREE.BufferGeometry();
-    const pos = new Float32Array(count * 3);
-    for (let i = 0; i < count; i++) {
-      pos[i * 3] = (Math.random() - 0.5) * 200;
-      pos[i * 3 + 1] = Math.random() * 50;
-      pos[i * 3 + 2] = (Math.random() - 0.5) * 200;
-    }
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-
-    this.rainParticles = new THREE.Points(geo,
-      new THREE.PointsMaterial({ color: 0xaaaacc, size: 0.12, transparent: true, opacity: 0.5 })
-    );
-    this.rainParticles.visible = false;
-    this.scene.add(this.rainParticles);
   }
 
   // --- State machine ---
@@ -325,7 +278,6 @@ export class Game {
     this.ui.hud.style.display = 'none';
     this.ui.controlsHint.style.display = 'none';
     this.ui.minimap.style.display = 'none';
-    this.ui.speedo.style.display = 'none';
     this.ui.boostWrap.style.display = 'none';
     this.ui.policeWarning?.classList.remove('active');
     this.ui.powercutOverlay?.classList.remove('active');
@@ -359,7 +311,6 @@ export class Game {
       this.sunLight.intensity = mapCfg.sunIntensity;
     }
     this.city.mapConfig = mapCfg;
-    this._currentMap = this.selectedMap;
 
     this.score = 0;
     this.health = 100;
@@ -438,7 +389,6 @@ export class Game {
     this.ui.hud.style.display = 'flex';
     this.ui.controlsHint.style.display = 'block';
     this.ui.minimap.style.display = 'block';
-    this.ui.speedo.style.display = 'block';
     this.ui.boostWrap.style.display = 'block';
     const healthWrap = document.getElementById('health-bar-wrap');
     if (healthWrap) healthWrap.style.display = 'block';
@@ -494,7 +444,6 @@ export class Game {
     if (this.photoMode) {
       this.ui.photoModeEl?.classList.add('active');
       this.ui.hud.style.display = 'none';
-      this.ui.speedo.style.display = 'none';
       this.ui.boostWrap.style.display = 'none';
       this.ui.minimap.style.display = 'none';
       this.ui.controlsHint.style.display = 'none';
@@ -502,7 +451,6 @@ export class Game {
     } else {
       this.ui.photoModeEl?.classList.remove('active');
       this.ui.hud.style.display = 'flex';
-      this.ui.speedo.style.display = 'block';
       this.ui.boostWrap.style.display = 'block';
       this.ui.minimap.style.display = 'block';
       this.ui.controlsHint.style.display = 'block';
@@ -548,15 +496,13 @@ export class Game {
     if (this.redLightCooldown > 0) this.redLightCooldown -= delta;
     if (this.crashFineCooldown > 0) this.crashFineCooldown -= delta;
 
-    // Input (in versus mode, arrows are P2-only)
-    const isVs = this.mode === 'versus';
     const input = {
-      forward: keys['KeyW'] || (!isVs && keys['ArrowUp']),
-      backward: keys['KeyS'] || (!isVs && keys['ArrowDown']),
-      left: keys['KeyA'] || (!isVs && keys['ArrowLeft']),
-      right: keys['KeyD'] || (!isVs && keys['ArrowRight']),
+      forward: keys['KeyW'] || keys['ArrowUp'],
+      backward: keys['KeyS'] || keys['ArrowDown'],
+      left: keys['KeyA'] || keys['ArrowLeft'],
+      right: keys['KeyD'] || keys['ArrowRight'],
       honk: keys['Space'],
-      boost: keys['ShiftLeft'] || (!isVs && keys['ShiftRight']),
+      boost: keys['ShiftLeft'] || keys['ShiftRight'],
       fire: keys['KeyF'],
     };
 
@@ -595,7 +541,6 @@ export class Game {
     this.traffic.update(delta, this.vehicle);
     this.wildlife.update(delta, this.vehicle.position);
 
-    // Pigeon scatter
     // Rival AI racers
     this.rivalAI.update(delta, this.city.getNearbyBuildings(this.vehicle.position.x, this.vehicle.position.z), this.gameTime);
 
@@ -1207,7 +1152,7 @@ export class Game {
     const min = Math.floor(this.timeLeft / 60);
     const sec = Math.floor(this.timeLeft % 60);
     this.ui.timer.textContent = `${min}:${sec.toString().padStart(2, '0')}`;
-    this.ui.timer.className = this.timeLeft < 20 ? 'vl warn' : 'vl';
+    this.ui.timer.className = this.timeLeft < 20 ? 'hud-big warn' : 'hud-big';
     this.ui.score.textContent = `${this.score} pts`;
     if (this.ui.deliveries) this.ui.deliveries.textContent = `R${this.currentRound || 1}`;
     if (this.ui.levelNum) this.ui.levelNum.textContent = this.totalRounds || 3;
@@ -1238,10 +1183,6 @@ export class Game {
     ctx.clearRect(0, 0, W, H);
 
     // Background
-    ctx.fillStyle = '#0d1117';
-    ctx.fillRect(0, 0, W, H);
-
-    // Grass areas (buildings)
     ctx.fillStyle = '#1a2a1a';
     ctx.fillRect(0, 0, W, H);
 
@@ -1532,8 +1473,6 @@ export class Game {
       ctx.stroke();
     }
 
-    // Race destination on minimap (already added above with rivals)
-
     ctx.restore(); // end rotation
 
     // Player icon (always centered, always pointing up)
@@ -1630,19 +1569,6 @@ export class Game {
     el.style.animation = 'violationTextAnim 1.2s ease-out forwards';
   }
 
-  showPoliceFine(amount) {
-    this.ui.violationFlash.classList.remove('active');
-    this.ui.violationFlash.offsetHeight;
-    this.ui.violationFlash.classList.add('active');
-
-    const el = this.ui.violationText;
-    el.textContent = `BUSTED! -Rs. ${amount}`;
-    el.style.animation = 'none';
-    el.offsetHeight;
-    el.style.animation = 'violationTextAnim 1.2s ease-out forwards';
-  }
-
-
   // --- Power Cut ---
   updatePowerCut(delta) {
     if (this.trafficLights.isPowerCut()) return;
@@ -1691,10 +1617,8 @@ export class Game {
     this.ui.hud.style.display = 'none';
     this.ui.controlsHint.style.display = 'none';
     this.ui.minimap.style.display = 'none';
-    this.ui.speedo.style.display = 'none';
     this.ui.boostWrap.style.display = 'none';
     this.ui.crosshair.classList.remove('active');
-    this.ui.comboDisplay.classList.remove('visible');
     this.hidePassengerInfo();
 
     const mpSb = document.getElementById('mp-scoreboard');

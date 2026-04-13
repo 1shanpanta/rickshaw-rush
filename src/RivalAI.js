@@ -233,24 +233,6 @@ export class RivalAI {
     rival.speed *= 0.1;
   }
 
-  handleBuildingCollisions(rival, bounds) {
-    const pos = rival.position;
-    const radius = 2.5;
-    for (const b of bounds) {
-      const cx = Math.max(b.minX, Math.min(pos.x, b.maxX));
-      const cz = Math.max(b.minZ, Math.min(pos.z, b.maxZ));
-      const dx = pos.x - cx;
-      const dz = pos.z - cz;
-      const dist = Math.sqrt(dx * dx + dz * dz);
-      if (dist < radius) {
-        const push = (radius - dist) + 1;
-        if (dist > 0.001) { pos.x += (dx / dist) * push; pos.z += (dz / dist) * push; }
-        else pos.x += push;
-        rival.speed *= 0.4;
-      }
-    }
-  }
-
   getPositions(playerPos, playerFinished, playerFinishTime, gameTime) {
     const racers = [
       { name: 'You', dist: playerFinished ? 0 : playerPos.distanceTo(this.destination || playerPos), finished: playerFinished, finishTime: playerFinishTime, isPlayer: true },

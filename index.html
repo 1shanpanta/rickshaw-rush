@@ -38,12 +38,6 @@
     /* --- Vignette --- */
     #vignette{position:fixed;inset:0;pointer-events:none;z-index:3;background:radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.35) 100%)}
 
-    /* --- Speedometer (hidden — contextual only) --- */
-    #speedo{position:fixed;left:20px;bottom:80px;pointer-events:none;z-index:10;display:none;text-align:center;opacity:0;transition:opacity .3s}
-    #speedo.active{opacity:1}
-    #speedo-value{font-size:28px;font-weight:700;color:#fff;line-height:1;text-shadow:0 2px 6px rgba(0,0,0,.5)}
-    #speedo-unit{font-size:10px;color:rgba(255,255,255,.4);text-transform:uppercase}
-
     /* --- Boost gauge (minimal, bottom-right) --- */
     #boost-wrap{position:fixed;right:20px;bottom:80px;pointer-events:none;z-index:10;display:none;text-align:center;opacity:0;transition:opacity .3s}
     #boost-wrap.active{opacity:1}
@@ -51,18 +45,6 @@
     #boost-bar-wrap{width:4px;height:60px;background:rgba(255,255,255,.08);border-radius:2px;overflow:hidden;position:relative;margin:0 auto}
     #boost-bar{position:absolute;bottom:0;width:100%;background:linear-gradient(to top,#22d3ee,#a78bfa);border-radius:2px;transition:height .15s}
     #boost-status{font-size:9px;color:rgba(255,255,255,.25);margin-top:3px}
-
-    /* --- Combo --- */
-    #combo-display{position:fixed;top:76px;left:50%;transform:translateX(-50%);font-size:22px;font-weight:700;color:#fbbf24;pointer-events:none;z-index:10;opacity:0;transition:opacity .3s;text-shadow:0 0 20px rgba(251,191,36,.5)}
-    #combo-display.visible{opacity:1}
-
-    /* --- Level up --- */
-    #level-up{position:fixed;top:40%;left:50%;transform:translate(-50%,-50%);font-size:36px;font-weight:700;pointer-events:none;z-index:16;opacity:0;text-shadow:0 0 30px rgba(34,211,238,.5)}
-    @keyframes levelUpAnim{0%{opacity:1;transform:translate(-50%,-50%) scale(.8);color:#22d3ee}50%{opacity:1;transform:translate(-50%,-50%) scale(1.2);color:#4ade80}100%{opacity:0;transform:translate(-50%,-60%) scale(1)}}
-
-    /* --- Star rating popup --- */
-    #star-popup{position:fixed;top:35%;left:50%;transform:translate(-50%,-50%);font-size:48px;pointer-events:none;z-index:16;opacity:0;letter-spacing:4px}
-    @keyframes starAnim{0%{opacity:0;transform:translate(-50%,-50%) scale(.5)}20%{opacity:1;transform:translate(-50%,-50%) scale(1.1)}40%{transform:translate(-50%,-50%) scale(1)}100%{opacity:0;transform:translate(-50%,-60%) scale(1)}}
 
     /* --- Passenger info --- */
     #passenger-info{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.8);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:10px 24px;color:#fff;font-size:15px;font-weight:600;text-align:center;pointer-events:none;z-index:10;opacity:0;transition:opacity .3s;max-width:500px;white-space:nowrap}
@@ -82,10 +64,6 @@
 
     /* --- Speed lines --- */
     #speed-lines{position:fixed;inset:0;pointer-events:none;z-index:5;opacity:0;transition:opacity .2s;background:radial-gradient(ellipse at center,transparent 40%,rgba(255,255,255,.03) 100%)}
-
-    /* --- Rain overlay --- */
-    #rain-overlay{position:fixed;inset:0;pointer-events:none;z-index:4;opacity:0;transition:opacity 1s;background:linear-gradient(180deg,rgba(100,100,120,.15) 0%,transparent 100%)}
-    #rain-overlay.active{opacity:1}
 
     /* --- Screen overlay (menu/gameover) --- */
     #screen-overlay{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:20;background:rgba(0,0,0,.75);backdrop-filter:blur(12px);color:#fff;text-align:center}
@@ -167,10 +145,6 @@
     #police-warning.active{opacity:1;animation:policeFlash 0.5s ease-in-out infinite}
     @keyframes policeFlash{0%,100%{opacity:1;color:#ff4444}50%{opacity:.7;color:#4444ff}}
 
-    /* --- Festival banner --- */
-    #festival-banner{position:fixed;top:90px;left:50%;transform:translateX(-50%);pointer-events:none;z-index:10;font-size:13px;font-weight:700;color:#ffd700;opacity:0;transition:opacity .5s;text-shadow:0 0 10px rgba(255,215,0,.4);letter-spacing:1px}
-    #festival-banner.active{opacity:1}
-
     /* --- Power cut overlay --- */
     #powercut-overlay{position:fixed;inset:0;pointer-events:none;z-index:4;opacity:0;transition:opacity .5s;background:radial-gradient(ellipse at center,transparent 30%,rgba(0,0,0,.2) 100%)}
     #powercut-overlay.active{opacity:1}
@@ -193,8 +167,6 @@
     #music-toggle:hover{background:rgba(255,255,255,.12);transform:scale(1.1)}
     #music-toggle.muted{opacity:.5}
 
-    /* --- Animated title background --- */
-    #title-scene-hint{position:absolute;bottom:20px;left:50%;transform:translateX(-50%);font-size:11px;opacity:0.2;letter-spacing:1px}
   </style>
 </head>
 <body>
@@ -214,12 +186,6 @@
     <div id="health-bar"></div>
   </div>
 
-  <!-- Speedometer -->
-  <div id="speedo">
-    <div id="speedo-value">0</div>
-    <div id="speedo-unit">km/h</div>
-  </div>
-
   <!-- Boost gauge -->
   <div id="boost-wrap">
     <div id="boost-label">Boost</div>
@@ -228,21 +194,16 @@
   </div>
 
   <!-- Overlays -->
-  <div id="combo-display">COMBO x2</div>
-  <div id="level-up">LEVEL UP!</div>
-  <div id="star-popup"></div>
   <div id="passenger-info"><span id="passenger-text"></span></div>
   <div id="near-miss">NEAR MISS! +25</div>
   <div id="violation-flash"></div>
   <div id="violation-text"></div>
   <div id="speed-lines"></div>
-  <div id="rain-overlay"></div>
   <div id="vignette"></div>
   <div id="crosshair"></div>
   <div id="screen-flash"></div>
   <div id="slowmo-vignette"></div>
   <div id="police-warning">POLICE! ESCAPE!</div>
-  <div id="festival-banner">FESTIVAL MODE - FARES x2</div>
   <div id="powercut-overlay"></div>
 
   <!-- HUD direction arrow -->
