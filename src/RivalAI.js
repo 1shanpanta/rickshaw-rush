@@ -220,7 +220,7 @@ export class RivalAI {
       r.mesh.rotation.y = r.rotation;
 
       // Check if reached destination
-      if (destDist < 8) {
+      if (destDist < 30) {
         r.finished = true;
         r.finishTime = gameTime;
       }

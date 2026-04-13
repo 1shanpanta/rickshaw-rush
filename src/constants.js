@@ -2,7 +2,7 @@ export const CELL_SIZE = 30;
 export const GRID_SIZE = 40;
 
 export const COLORS = {
-  road: 0x3a3a3a,
+  road: 0x999999,
   sidewalk: 0x888888,
   sky: 0x8ec8e8,
   fog: 0xc8dde8,

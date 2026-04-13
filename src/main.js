@@ -100,7 +100,7 @@ window.addEventListener('keydown', (e) => {
   keys[e.code] = true;
 
   if (game.state === STATE.MENU || game.state === STATE.GAMEOVER) {
-    if (e.code === 'Digit1' || e.code === 'Enter') {
+    if (e.code === 'Digit1' || e.code === 'Enter' || e.code === 'KeyR') {
       game.setMode('single');
       game.handleStart();
     }

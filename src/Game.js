@@ -43,14 +43,6 @@ export class Game {
     this.photoMode = false;
     this.photoOrbitAngle = 0;
 
-    // Dynamic events
-    this.dynamicEventTimer = 20;
-    this.activeEvents = [];
-
-    // Drift spark timer
-    this.driftSparkTimer = 0;
-    this.tireMarkTimer = 0;
-
     // Remote players (online mode)
     this.remotePlayers = {};
     this.remoteScores = {};
@@ -79,25 +71,13 @@ export class Game {
     this.camIdeal = new THREE.Vector3();
     this.camLookTarget = new THREE.Vector3();
 
-    // Weather
-    this.isRaining = false;
-    this.rainTimer = 0;
-    this.rainCooldown = 30;
+    // Weather (particles only — no rain logic)
     this.rainParticles = null;
     this.dustParticles = null;
 
     // Red light tracking
     this.wasInRedZone = false;
     this.redLightCooldown = 0;
-
-    // Drift scoring
-    this.driftTimer = 0;
-    this.driftScore = 0;
-    this.isDrifting = false;
-
-    // Time bonus pickups
-    this.timeBonuses = [];
-    this.timeBonusSpawnTimer = 12;
 
     // Player trail (for minimap)
     this.trail = [];
@@ -112,20 +92,6 @@ export class Game {
 
     // Power cut event
     this.powerCutCooldown = 45;
-
-    // Construction zones
-    this.constructionZones = [];
-    this.constructionSpawnTimer = 30;
-
-    // Pedestrian crowds
-    this.pedestrianCrowds = [];
-
-    // Festival mode
-    this.festivalMode = false;
-    this.festivalLights = [];
-
-    // Vehicle upgrades (persistent between runs)
-    this.upgrades = JSON.parse(localStorage.getItem('rickshaw-rush-upgrades') || '{"speed":0,"brakes":0,"earnings":0,"boost":0}');
 
     // Nepali dialogues
     this.dialogueTimer = 0;
@@ -383,7 +349,6 @@ export class Game {
     this.ui.boostWrap.style.display = 'none';
     this.ui.ammoWrap.style.display = 'none';
     this.ui.policeWarning?.classList.remove('active');
-    this.ui.festivalBanner?.classList.remove('active');
     this.ui.powercutOverlay?.classList.remove('active');
     const hudArrow = document.getElementById('hud-arrow');
     if (hudArrow) hudArrow.style.display = 'none';
@@ -434,8 +399,6 @@ export class Game {
     this.violations = 0;
     this.fines = 0;
     this.nearMisses = 0;
-    this.isRaining = false;
-    this.rainCooldown = 30;
 
     const start = this.getStartPosition();
     this.vehicle.setPosition(start.x, 0, start.z);
@@ -486,23 +449,13 @@ export class Game {
     this.rivalAI.setDestination(this.raceDestination);
     this.rivalAI.spawn(3, start);
 
-    // Clean time bonuses
-    for (const tb of this.timeBonuses) removeAndDispose(this.scene, tb.mesh);
-    this.timeBonuses = [];
-    this.timeBonusSpawnTimer = 12;
     this.trail = [];
-    this.driftTimer = 0;
-    this.driftScore = 0;
     this.fullmapOpen = false;
     this.timeScale = 1;
     this.slowMoTimer = 0;
     this.targetFOV = this.baseFOV;
     this.camera.fov = this.baseFOV;
     this.photoMode = false;
-    this.dynamicEventTimer = 20;
-    this.activeEvents = [];
-    this.driftSparkTimer = 0;
-    this.tireMarkTimer = 0;
     this.effects.cleanup();
     this._duskBellPlayed = false;
     if (this.ui.fullmap) this.ui.fullmap.style.display = 'none';
@@ -511,28 +464,6 @@ export class Game {
     this.powerCutCooldown = 45;
     this.trafficLights.endPowerCut();
 
-    // Construction zones
-    for (const cz of this.constructionZones) {
-      for (const m of cz.meshes) removeAndDispose(this.scene, m);
-    }
-    this.constructionZones = [];
-    this.constructionSpawnTimer = 30;
-
-    // Pedestrian crowds
-    for (const pc of this.pedestrianCrowds) {
-      for (const m of pc.meshes) removeAndDispose(this.scene, m);
-    }
-    this.pedestrianCrowds = [];
-    this.spawnPedestrianCrowds();
-
-    // Festival mode
-    this.festivalMode = false;
-    for (const fl of this.festivalLights) removeAndDispose(this.scene, fl);
-    this.festivalLights = [];
-
-    // Apply vehicle upgrades
-    this.applyUpgrades();
-
     // UI
     this.ui.overlay.classList.add('hidden');
     this.ui.hud.style.display = 'flex';
@@ -540,11 +471,9 @@ export class Game {
     this.ui.minimap.style.display = 'block';
     this.ui.speedo.style.display = 'block';
     this.ui.boostWrap.style.display = 'block';
-    this.ui.rainOverlay.classList.remove('active');
     this.ui.ammoWrap.style.display = 'block';
     const healthWrap = document.getElementById('health-bar-wrap');
     if (healthWrap) healthWrap.style.display = 'block';
-    this.rainParticles.visible = false;
     this.projectiles.reset();
 
     // Race countdown (3, 2, 1, GO!)
@@ -708,13 +637,20 @@ export class Game {
     // Rival AI racers
     this.rivalAI.update(delta, this.city.getNearbyBuildings(this.vehicle.position.x, this.vehicle.position.z), this.gameTime);
 
-    // Check if player reached destination
+    // Check if player reached destination (within ~30 units / same road area)
     if (this.raceDestination && !this.playerFinished) {
       const dx = this.vehicle.position.x - this.raceDestination.x;
       const dz = this.vehicle.position.z - this.raceDestination.z;
-      if (dx * dx + dz * dz < 64) { // within 8 units
+      if (dx * dx + dz * dz < 900) { // within 30 units — same road area
         this.playerFinished = true;
         this.playerFinishTime = this.gameTime;
+        // Show finish announcement
+        const positions = this.rivalAI.getPositions(this.vehicle.position, true, this.gameTime, this.gameTime);
+        const pos = positions.findIndex(p => p.isPlayer) + 1;
+        const suffix = pos === 1 ? 'st' : pos === 2 ? 'nd' : pos === 3 ? 'rd' : 'th';
+        const msg = pos === 1 ? `🏆 ${pos}${suffix} PLACE! +500 pts` : `${pos}${suffix} PLACE! +${[500,300,150,50][pos-1]} pts`;
+        this.showPassengerInfo(msg);
+        setTimeout(() => this.hidePassengerInfo(), 3000);
       }
     }
 
@@ -742,9 +678,6 @@ export class Game {
 
     // Update race position HUD
     this.updateRacePosition();
-
-    // Weather
-    this.updateWeather(delta);
 
     // Day cycle
     this.updateDayCycle();
@@ -786,12 +719,6 @@ export class Game {
       }
     }
 
-    // Drift scoring
-    this.updateDrift(delta, input);
-
-    // Time bonus pickups
-    this.updateTimeBonuses(delta);
-
     // Player trail
     this.trailTimer += delta;
     if (this.trailTimer > 0.15) {
@@ -809,17 +736,8 @@ export class Game {
       this.caPass.uniforms.amount.value += (targetCA - this.caPass.uniforms.amount.value) * Math.min(8 * delta, 1);
     }
 
-    // Dynamic events
-    this.updateDynamicEvents(delta);
-
     // Power cut event
     this.updatePowerCut(delta);
-
-    // Construction zones
-    this.updateConstructionZones(delta);
-
-    // Pedestrian crowds
-    this.updatePedestrianCrowds(delta);
 
     // Police chase
     const policeResult = this.police.update(delta, this.vehicle.position, this.city.getNearbyBuildings(this.police.position.x, this.police.position.z));
@@ -930,9 +848,6 @@ export class Game {
 
     // Police warning overlay
     this.ui.policeWarning?.classList.toggle('active', this.police.isActive());
-
-    // Festival banner
-    this.ui.festivalBanner?.classList.toggle('active', this.festivalMode);
 
     // Power cut overlay
     this.ui.powercutOverlay?.classList.toggle('active', this.trafficLights.isPowerCut());
@@ -1137,55 +1052,6 @@ export class Game {
     this.wasInRedZone = isInRedZone;
   }
 
-  // --- Weather ---
-  updateWeather(delta) {
-    this.rainCooldown -= delta;
-
-    if (this.isRaining) {
-      this.rainTimer -= delta;
-      if (this.rainTimer <= 0) this.stopRain();
-      else this.updateRainParticles(delta);
-    } else if (this.rainCooldown <= 0 && Math.random() < 0.001) {
-      this.startRain();
-    }
-  }
-
-  startRain() {
-    this.isRaining = true;
-    this.rainTimer = 15 + Math.random() * 10;
-    this.vehicle.gripMultiplier = 0.65;
-    this.rainParticles.visible = true;
-    this.ui.rainOverlay.classList.add('active');
-    if (this.music.startRainSound) this.music.startRainSound();
-    this.showPassengerInfo('Monsoon rain! Roads slippery!');
-    this.showDialogue('rain');
-    setTimeout(() => this.hidePassengerInfo(), 2500);
-  }
-
-  stopRain() {
-    this.isRaining = false;
-    this.rainCooldown = 25 + Math.random() * 20;
-    this.vehicle.gripMultiplier = 1;
-    this.rainParticles.visible = false;
-    this.ui.rainOverlay.classList.remove('active');
-    if (this.music.stopRainSound) this.music.stopRainSound();
-  }
-
-
-  updateRainParticles(delta) {
-    const arr = this.rainParticles.geometry.attributes.position.array;
-    const pPos = this.vehicle.position;
-    for (let i = 0; i < arr.length; i += 3) {
-      arr[i + 1] -= 45 * delta;
-      if (arr[i + 1] < 0) {
-        arr[i] = pPos.x + (Math.random() - 0.5) * 200;
-        arr[i + 1] = 40 + Math.random() * 15;
-        arr[i + 2] = pPos.z + (Math.random() - 0.5) * 200;
-      }
-    }
-    this.rainParticles.geometry.attributes.position.needsUpdate = true;
-  }
-
   updateDust(delta) {
     const arr = this.dustParticles.geometry.attributes.position.array;
     for (let i = 0; i < arr.length; i += 3) {
@@ -1228,13 +1094,6 @@ export class Game {
       fogDensity = 0.005 + t * 0.003;
     }
 
-    // Apply rain darkening
-    if (this.isRaining) {
-      skyColor.multiplyScalar(0.6);
-      sunIntensity *= 0.5;
-      fogDensity += 0.002;
-    }
-
     this.scene.background = skyColor;
     this.scene.fog = new THREE.FogExp2(skyColor, fogDensity);
     this.sunLight.color = sunColor;
@@ -1258,7 +1117,6 @@ export class Game {
       } else {
         bloomStrength = 0.65 + (progress - 0.82) / 0.18 * 0.35; // night: full glow
       }
-      if (this.isRaining) bloomStrength += 0.1;
       this.bloomPass.strength = bloomStrength;
     }
   }
@@ -1404,137 +1262,6 @@ export class Game {
     this.ui.crosshair.classList.toggle('active', fast);
   }
 
-  // --- Drift ---
-  updateDrift(delta, input) {
-    const speed = Math.abs(this.vehicle.speed);
-    const turning = input.left || input.right;
-    const wasDrifting = this.isDrifting;
-
-    this.isDrifting = turning && speed > 22 && this.vehicle.gripMultiplier < 1;
-    // Also count as drift at very high speed turns even without rain
-    if (!this.isDrifting) {
-      this.isDrifting = turning && speed > 35;
-    }
-
-    if (this.isDrifting) {
-      this.driftTimer += delta;
-      this.driftScore += Math.floor(speed * delta * 2);
-      // Drift sparks
-      this.driftSparkTimer += delta;
-      if (this.driftSparkTimer > 0.04) {
-        this.driftSparkTimer = 0;
-        this.effects.spawnSparks(this.vehicle.position, this.vehicle.rotation);
-      }
-      // Tire marks
-      this.tireMarkTimer += delta;
-      if (this.tireMarkTimer > 0.08) {
-        this.tireMarkTimer = 0;
-        this.effects.spawnTireMark(this.vehicle.position, this.vehicle.rotation);
-      }
-    } else if (wasDrifting && this.driftTimer > 0.8) {
-      // Cash in drift
-      const bonus = Math.min(this.driftScore, 200);
-      this.score += bonus;
-      this.showPassengerInfo(`DRIFT! +Rs. ${bonus}`);
-      setTimeout(() => this.hidePassengerInfo(), 1500);
-      this.driftTimer = 0;
-      this.driftScore = 0;
-    } else {
-      this.driftTimer = 0;
-      this.driftScore = 0;
-    }
-  }
-
-  // --- Time Bonus Pickups ---
-  updateTimeBonuses(delta) {
-    this.timeBonusSpawnTimer -= delta;
-    if (this.timeBonusSpawnTimer <= 0) {
-      this.timeBonusSpawnTimer = 10 + Math.random() * 15;
-      this.spawnTimeBonus();
-    }
-
-    const vPos = this.vehicle.position;
-    for (let i = this.timeBonuses.length - 1; i >= 0; i--) {
-      const tb = this.timeBonuses[i];
-      tb.life -= delta;
-
-      // Animate
-      tb.mesh.position.y = 2 + Math.sin(performance.now() * 0.005 + i) * 0.5;
-      tb.mesh.rotation.y += delta * 2;
-
-      // Collect
-      const dx = vPos.x - tb.position.x;
-      const dz = vPos.z - tb.position.z;
-      if (Math.sqrt(dx * dx + dz * dz) < 4) {
-        this.timeLeft = Math.min(this.timeLeft + tb.seconds, GAME.totalTime);
-        this.showPassengerInfo(`+${tb.seconds}s TIME BONUS!`);
-        this.music.playPickup();
-        setTimeout(() => this.hidePassengerInfo(), 1500);
-        removeAndDispose(this.scene, tb.mesh);
-        this.timeBonuses.splice(i, 1);
-        continue;
-      }
-
-      // Expire
-      if (tb.life <= 0) {
-        removeAndDispose(this.scene, tb.mesh);
-        this.timeBonuses.splice(i, 1);
-      }
-    }
-  }
-
-  spawnTimeBonus() {
-    const roads = this.city.getRoadPositions();
-    const rp = roads[Math.floor(Math.random() * roads.length)];
-
-    const group = new THREE.Group();
-    // Clock-like icon: torus + hands
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(0.8, 0.15, 8, 16),
-      new THREE.MeshBasicMaterial({ color: 0x22d3ee })
-    );
-    ring.rotation.x = Math.PI / 2;
-    group.add(ring);
-
-    const center = new THREE.Mesh(
-      new THREE.SphereGeometry(0.15, 6, 6),
-      new THREE.MeshBasicMaterial({ color: 0x22d3ee })
-    );
-    group.add(center);
-
-    // Plus sign
-    const barH = new THREE.Mesh(
-      new THREE.BoxGeometry(0.6, 0.12, 0.12),
-      new THREE.MeshBasicMaterial({ color: 0xffffff })
-    );
-    group.add(barH);
-    const barV = new THREE.Mesh(
-      new THREE.BoxGeometry(0.12, 0.6, 0.12),
-      new THREE.MeshBasicMaterial({ color: 0xffffff })
-    );
-    group.add(barV);
-
-    // Glow ring on ground
-    const glow = new THREE.Mesh(
-      new THREE.RingGeometry(1.5, 2.2, 16),
-      new THREE.MeshBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.15, side: THREE.DoubleSide })
-    );
-    glow.rotation.x = -Math.PI / 2;
-    glow.position.y = -1.8;
-    group.add(glow);
-
-    group.position.set(rp.x, 2, rp.z);
-    this.scene.add(group);
-
-    const seconds = [5, 8, 10][Math.floor(Math.random() * 3)];
-    this.timeBonuses.push({
-      position: rp.clone(),
-      mesh: group,
-      seconds,
-      life: 20,
-    });
-  }
-
   // --- Fullscreen map toggle ---
   toggleFullmap() {
     this.fullmapOpen = !this.fullmapOpen;
@@ -1600,14 +1327,6 @@ export class Game {
       ctx.fillStyle = colors[tl.state];
       ctx.beginPath();
       ctx.arc(tl.position.x * s, tl.position.z * s, 3, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    // Time bonuses
-    ctx.fillStyle = '#22d3ee';
-    for (const tb of this.timeBonuses) {
-      ctx.beginPath();
-      ctx.arc(tb.position.x * s, tb.position.z * s, 4, 0, Math.PI * 2);
       ctx.fill();
     }
 
@@ -1842,18 +1561,6 @@ export class Game {
       ctx.beginPath(); ctx.arc(fx, fz, 4, 0, Math.PI * 2); ctx.fill();
     }
 
-    // Time bonuses
-    ctx.fillStyle = '#22d3ee';
-    for (const tb of this.timeBonuses) {
-      const bx = wx(tb.position.x);
-      const bz = wz(tb.position.z);
-      if (Math.abs(bx) > cx || Math.abs(bz) > cy) continue;
-      const pulse = 2.5 + Math.sin(time + tb.life) * 0.8;
-      ctx.beginPath();
-      ctx.arc(bx, bz, pulse, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
     // Trail
     if (this.trail.length > 1) {
       ctx.strokeStyle = 'rgba(255,68,68,.18)';
@@ -1977,161 +1684,6 @@ export class Game {
   }
 
 
-  // --- Dynamic Events ---
-  updateDynamicEvents(delta) {
-    this.dynamicEventTimer -= delta;
-    if (this.dynamicEventTimer <= 0) {
-      this.dynamicEventTimer = 25 + Math.random() * 20;
-      this.spawnDynamicEvent();
-    }
-
-    // Update active events
-    for (let i = this.activeEvents.length - 1; i >= 0; i--) {
-      const ev = this.activeEvents[i];
-      ev.life -= delta;
-
-      if (ev.type === 'procession') {
-        for (const npc of ev.meshes) {
-          npc.position.x += ev.dirX * 2 * delta;
-          npc.position.z += ev.dirZ * 2 * delta;
-          npc.children[0].position.y = 1 + Math.sin(performance.now() * 0.005 + npc.userData.phase) * 0.15;
-        }
-      } else if (ev.type === 'sitting_cow') {
-        ev.meshes[0].children[0].rotation.y = Math.sin(performance.now() * 0.001) * 0.1;
-      }
-
-      // Collision with player
-      const vPos = this.vehicle.position;
-      const vSpeed = Math.abs(this.vehicle.speed);
-      if (vSpeed > 3 && !ev._hitCooldown) {
-        for (const mesh of ev.meshes) {
-          const dx = vPos.x - mesh.position.x;
-          const dz = vPos.z - mesh.position.z;
-          const dist = Math.sqrt(dx * dx + dz * dz);
-          const hitRadius = ev.type === 'sitting_cow' ? 2.5 : 1.5;
-          if (dist < hitRadius) {
-            // Push player back
-            if (dist > 0.01) {
-              vPos.x += (dx / dist) * (hitRadius - dist) * 0.5;
-              vPos.z += (dz / dist) * (hitRadius - dist) * 0.5;
-            }
-            this.vehicle.speed *= 0.3;
-            this.shakeIntensity = 0.3;
-            this.effects.spawnDebris(mesh.position);
-            ev._hitCooldown = 1.5;
-
-            // Type-specific sounds
-            if (ev.type === 'sitting_cow') {
-              if (this.music.playMoo) this.music.playMoo();
-            } else if (ev.type === 'procession') {
-              if (this.music.playAiyaa) this.music.playAiyaa();
-            } else {
-              if (this.music.playSoftCrash) this.music.playSoftCrash();
-            }
-            break;
-          }
-        }
-      }
-      if (ev._hitCooldown > 0) ev._hitCooldown -= delta;
-
-      if (ev.life <= 0) {
-        for (const m of ev.meshes) removeAndDispose(this.scene, m);
-        this.activeEvents.splice(i, 1);
-      }
-    }
-  }
-
-  spawnDynamicEvent() {
-    const roads = this.city.getRoadPositions();
-    const rp = roads[Math.floor(Math.random() * roads.length)];
-    const eventType = Math.random();
-
-    if (eventType < 0.4) {
-      // Festival procession - line of 6 NPCs with colorful outfits walking across a road
-      const meshes = [];
-      const isHoriz = Math.random() > 0.5;
-      const dirX = isHoriz ? (Math.random() > 0.5 ? 1 : -1) : 0;
-      const dirZ = isHoriz ? 0 : (Math.random() > 0.5 ? 1 : -1);
-      const colors = [0xff4444, 0xff8800, 0xffcc00, 0x44ff44, 0x4488ff, 0xff44ff];
-
-      for (let i = 0; i < 6; i++) {
-        const g = new THREE.Group();
-        const body = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.3, 0.4, 1.2, 6),
-          new THREE.MeshLambertMaterial({ color: colors[i % colors.length] })
-        );
-        body.position.y = 1;
-        g.add(body);
-        const head = new THREE.Mesh(
-          new THREE.SphereGeometry(0.2, 6, 6),
-          new THREE.MeshLambertMaterial({ color: 0xc68642 })
-        );
-        head.position.y = 1.8;
-        g.add(head);
-        g.position.set(
-          rp.x + (isHoriz ? -i * 1.5 * dirX : (Math.random() - 0.5) * 2),
-          0,
-          rp.z + (isHoriz ? (Math.random() - 0.5) * 2 : -i * 1.5 * dirZ)
-        );
-        g.userData.phase = i * 0.5;
-        this.scene.add(g);
-        meshes.push(g);
-      }
-
-      this.activeEvents.push({ type: 'procession', meshes, dirX, dirZ, life: 15 });
-      this.showPassengerInfo('Festival procession! Watch out!');
-      setTimeout(() => this.hidePassengerInfo(), 2000);
-    } else if (eventType < 0.7) {
-      // Sitting cow in the middle of the road
-      const g = new THREE.Group();
-      const body = new THREE.Mesh(
-        new THREE.BoxGeometry(1.4, 0.8, 2),
-        new THREE.MeshLambertMaterial({ color: 0xd2b48c })
-      );
-      body.position.y = 0.4;
-      g.add(body);
-      const head = new THREE.Mesh(
-        new THREE.BoxGeometry(0.6, 0.5, 0.6),
-        new THREE.MeshLambertMaterial({ color: 0xd2b48c })
-      );
-      head.position.set(0, 0.6, 1.2);
-      g.add(head);
-      g.position.set(rp.x, 0, rp.z);
-      this.scene.add(g);
-
-      this.activeEvents.push({ type: 'sitting_cow', meshes: [g], life: 20 });
-      this.showPassengerInfo('Cow blocking the road! Go around!');
-      setTimeout(() => this.hidePassengerInfo(), 2000);
-    } else {
-      // Motorcycle rally - 8 fast motorcycles zooming past
-      const meshes = [];
-      const dir = Math.random() > 0.5 ? 1 : -1;
-      for (let i = 0; i < 8; i++) {
-        const bike = new THREE.Mesh(
-          new THREE.BoxGeometry(0.5, 0.8, 1.2),
-          new THREE.MeshLambertMaterial({ color: 0x222222 + Math.floor(Math.random() * 0x333333) })
-        );
-        bike.position.set(
-          rp.x + (Math.random() - 0.5) * 4 - dir * i * 3,
-          0.5,
-          rp.z + (Math.random() - 0.5) * 3
-        );
-        const rider = new THREE.Mesh(
-          new THREE.BoxGeometry(0.35, 0.6, 0.35),
-          new THREE.MeshLambertMaterial({ color: 0x444444 })
-        );
-        rider.position.y = 0.7;
-        bike.add(rider);
-        this.scene.add(bike);
-        meshes.push(bike);
-      }
-
-      this.activeEvents.push({
-        type: 'procession', meshes, dirX: dir, dirZ: 0, life: 8,
-      });
-    }
-  }
-
   // --- Power Cut ---
   updatePowerCut(delta) {
     if (this.trafficLights.isPowerCut()) return;
@@ -2144,441 +1696,6 @@ export class Game {
       this.showPassengerInfo('LOAD SHEDDING! Traffic lights are out!');
       setTimeout(() => this.hidePassengerInfo(), 2500);
     }
-  }
-
-  // --- Construction Zones ---
-  updateConstructionZones(delta) {
-    this.constructionSpawnTimer -= delta;
-    if (this.constructionSpawnTimer <= 0 && this.constructionZones.length < 3) {
-      this.constructionSpawnTimer = 25 + Math.random() * 20;
-      this.spawnConstructionZone();
-    }
-
-    const vPos = this.vehicle.position;
-    for (let i = this.constructionZones.length - 1; i >= 0; i--) {
-      const cz = this.constructionZones[i];
-      cz.life -= delta;
-
-      // Animate barrier stripes
-      for (const mesh of cz.meshes) {
-        if (mesh.userData.isBarrier) {
-          mesh.rotation.y += delta * 0.1;
-        }
-      }
-
-      // Collision with player
-      const dx = vPos.x - cz.position.x;
-      const dz = vPos.z - cz.position.z;
-      const dist = Math.sqrt(dx * dx + dz * dz);
-      if (dist < cz.radius) {
-        const push = cz.radius - dist;
-        if (dist > 0.01) {
-          vPos.x += (dx / dist) * push * 0.8;
-          vPos.z += (dz / dist) * push * 0.8;
-        }
-        this.vehicle.speed *= 0.3;
-        this.shakeIntensity = 0.15;
-      }
-
-      if (cz.life <= 0) {
-        for (const m of cz.meshes) removeAndDispose(this.scene, m);
-        this.constructionZones.splice(i, 1);
-      }
-    }
-  }
-
-  spawnConstructionZone() {
-    const roads = this.city.getRoadPositions();
-    const playerPos = this.vehicle.position;
-
-    // Pick a road far enough from player
-    let rp;
-    for (let attempt = 0; attempt < 20; attempt++) {
-      const candidate = roads[Math.floor(Math.random() * roads.length)];
-      const dx = candidate.x - playerPos.x;
-      const dz = candidate.z - playerPos.z;
-      if (dx * dx + dz * dz > 2500) { // at least 50 units away
-        rp = candidate;
-        break;
-      }
-    }
-    if (!rp) return;
-
-    const meshes = [];
-
-    // Orange barriers (4 barriers in a square)
-    for (let i = 0; i < 4; i++) {
-      const angle = (i / 4) * Math.PI * 2;
-      const bx = rp.x + Math.cos(angle) * 4;
-      const bz = rp.z + Math.sin(angle) * 4;
-
-      const barrier = new THREE.Group();
-
-      // Post
-      const post = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.1, 0.1, 2, 6),
-        new THREE.MeshLambertMaterial({ color: 0xff6600 })
-      );
-      post.position.y = 1;
-      barrier.add(post);
-
-      // Striped bar
-      const bar = new THREE.Mesh(
-        new THREE.BoxGeometry(3, 0.3, 0.15),
-        new THREE.MeshLambertMaterial({ color: 0xff8800 })
-      );
-      bar.position.y = 1.8;
-      barrier.add(bar);
-
-      // Black stripe
-      const stripe = new THREE.Mesh(
-        new THREE.BoxGeometry(1.2, 0.3, 0.16),
-        new THREE.MeshBasicMaterial({ color: 0x111111 })
-      );
-      stripe.position.y = 1.8;
-      barrier.add(stripe);
-
-      barrier.position.set(bx, 0, bz);
-      barrier.rotation.y = angle;
-      barrier.userData.isBarrier = true;
-      this.scene.add(barrier);
-      meshes.push(barrier);
-    }
-
-    // Warning sign
-    const signCanvas = document.createElement('canvas');
-    signCanvas.width = 64;
-    signCanvas.height = 64;
-    const ctx = signCanvas.getContext('2d');
-    ctx.fillStyle = '#ff6600';
-    ctx.beginPath();
-    ctx.moveTo(32, 4);
-    ctx.lineTo(60, 56);
-    ctx.lineTo(4, 56);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = '#000';
-    ctx.font = 'bold 28px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('!', 32, 48);
-    const signTex = new THREE.CanvasTexture(signCanvas);
-    const sign = new THREE.Sprite(new THREE.SpriteMaterial({ map: signTex, transparent: true }));
-    sign.scale.set(3, 3, 1);
-    sign.position.set(rp.x, 4, rp.z);
-    this.scene.add(sign);
-    meshes.push(sign);
-
-    // Blinking light
-    const blinker = new THREE.PointLight(0xff6600, 2, 12);
-    blinker.position.set(rp.x, 3, rp.z);
-    this.scene.add(blinker);
-    meshes.push(blinker);
-
-    this.constructionZones.push({
-      position: rp.clone(),
-      radius: 6,
-      meshes,
-      life: 30 + Math.random() * 20,
-    });
-
-    this.showDialogue('construction');
-  }
-
-  // --- Pedestrian Crowds ---
-  spawnPedestrianCrowds() {
-    const citySize = GRID_SIZE * CELL_SIZE;
-
-    // Spawn clusters near building edges (market areas)
-    for (let x = 1; x < GRID_SIZE - 1; x++) {
-      for (let z = 1; z < GRID_SIZE - 1; z++) {
-        if (this.city.grid[x][z] !== 'building') continue;
-        // Only spawn near roads
-        const hasRoadNeighbor = this.city.isRoad(x - 1, z) || this.city.isRoad(x + 1, z) ||
-          this.city.isRoad(x, z - 1) || this.city.isRoad(x, z + 1);
-        if (!hasRoadNeighbor) continue;
-        if (Math.random() > 0.12) continue; // sparse spawning
-
-        const meshes = [];
-        const count = 3 + Math.floor(Math.random() * 4);
-        const cx = x * CELL_SIZE + CELL_SIZE / 2;
-        const cz = z * CELL_SIZE + CELL_SIZE * 0.1; // near road edge
-
-        for (let i = 0; i < count; i++) {
-          const g = new THREE.Group();
-          const skinColors = [0xc68642, 0x8d5524, 0xf1c27d, 0xe0ac69, 0xffdbac];
-          const clothColors = [0xdd3333, 0x3366cc, 0x22aa44, 0xcc6622, 0x9933cc, 0xcc2266, 0x2288aa];
-
-          const clothColor = clothColors[Math.floor(Math.random() * clothColors.length)];
-          const skinColor = skinColors[Math.floor(Math.random() * skinColors.length)];
-
-          // Torso
-          const body = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.5, 0.45, 1.8, 8),
-            new THREE.MeshPhongMaterial({ color: clothColor })
-          );
-          body.position.y = 1.8;
-          g.add(body);
-
-          // Head
-          const head = new THREE.Mesh(
-            new THREE.SphereGeometry(0.35, 8, 8),
-            new THREE.MeshPhongMaterial({ color: skinColor })
-          );
-          head.position.y = 3.1;
-          g.add(head);
-
-          // Legs
-          for (let leg = -1; leg <= 1; leg += 2) {
-            const legMesh = new THREE.Mesh(
-              new THREE.CylinderGeometry(0.15, 0.18, 1.0, 6),
-              new THREE.MeshPhongMaterial({ color: 0x333355 })
-            );
-            legMesh.position.set(leg * 0.2, 0.5, 0);
-            g.add(legMesh);
-          }
-
-          g.position.set(
-            cx + (Math.random() - 0.5) * 5,
-            0,
-            cz + (Math.random() - 0.5) * 5
-          );
-          g.userData.homeX = g.position.x;
-          g.userData.homeZ = g.position.z;
-          g.userData.scattered = false;
-          g.userData.wanderTimer = Math.random() * 5;
-          g.userData.wanderDirX = 0;
-          g.userData.wanderDirZ = 0;
-          this.scene.add(g);
-          meshes.push(g);
-        }
-
-        this.pedestrianCrowds.push({
-          position: new THREE.Vector3(cx, 0, cz),
-          meshes,
-          scatterTimer: 0,
-        });
-      }
-    }
-  }
-
-  updatePedestrianCrowds(delta) {
-    const vPos = this.vehicle.position;
-    const vSpeed = Math.abs(this.vehicle.speed);
-
-    for (const crowd of this.pedestrianCrowds) {
-      const dx = vPos.x - crowd.position.x;
-      const dz = vPos.z - crowd.position.z;
-      const dist = dx * dx + dz * dz;
-
-      // Scatter when vehicle is close and fast
-      if (dist < 100 && vSpeed > 8 && crowd.scatterTimer <= 0) {
-        crowd.scatterTimer = 3;
-        for (const ped of crowd.meshes) {
-          const pdx = ped.position.x - vPos.x;
-          const pdz = ped.position.z - vPos.z;
-          const pd = Math.sqrt(pdx * pdx + pdz * pdz) || 1;
-          ped.userData.scattered = true;
-          ped.userData.scatterVX = (pdx / pd) * (4 + Math.random() * 3);
-          ped.userData.scatterVZ = (pdz / pd) * (4 + Math.random() * 3);
-        }
-      }
-
-      if (crowd.scatterTimer > 0) {
-        crowd.scatterTimer -= delta;
-        for (const ped of crowd.meshes) {
-          if (ped.userData.scattered) {
-            ped.position.x += ped.userData.scatterVX * delta;
-            ped.position.z += ped.userData.scatterVZ * delta;
-            ped.userData.scatterVX *= 0.95;
-            ped.userData.scatterVZ *= 0.95;
-          }
-        }
-        if (crowd.scatterTimer <= 0) {
-          // Return to home positions
-          for (const ped of crowd.meshes) {
-            ped.userData.scattered = false;
-          }
-        }
-      } else {
-        // Idle wandering
-        for (const ped of crowd.meshes) {
-          ped.userData.wanderTimer -= delta;
-          if (ped.userData.wanderTimer <= 0) {
-            ped.userData.wanderTimer = 2 + Math.random() * 4;
-            ped.userData.wanderDirX = (Math.random() - 0.5) * 0.8;
-            ped.userData.wanderDirZ = (Math.random() - 0.5) * 0.8;
-          }
-          // Drift toward home
-          const hx = ped.userData.homeX - ped.position.x;
-          const hz = ped.userData.homeZ - ped.position.z;
-          ped.position.x += (ped.userData.wanderDirX + hx * 0.05) * delta;
-          ped.position.z += (ped.userData.wanderDirZ + hz * 0.05) * delta;
-          // Bob animation
-          ped.children[0].position.y = 0.8 + Math.sin(performance.now() * 0.003 + ped.userData.homeX) * 0.04;
-        }
-      }
-
-      // Collision with pedestrians — bounce off
-      if (dist < 25 && vSpeed > 5) {
-        for (const ped of crowd.meshes) {
-          const pdx = vPos.x - ped.position.x;
-          const pdz = vPos.z - ped.position.z;
-          const pd = Math.sqrt(pdx * pdx + pdz * pdz);
-          if (pd < 2.5 && this.crashFineCooldown <= 0) {
-            // Push player away
-            if (pd > 0.01) { vPos.x += (pdx / pd) * 2; vPos.z += (pdz / pd) * 2; }
-            const bounceForce = Math.min(vSpeed * 0.3, 12);
-            this.vehicle.speed = -Math.sign(this.vehicle.speed || 1) * bounceForce;
-            this.shakeIntensity = 0.2;
-            this.crashFineCooldown = 0.3;
-            break;
-          }
-        }
-      }
-    }
-  }
-
-  // --- Festival Mode (Tihar/Dashain) ---
-  activateFestivalMode() {
-    this.festivalMode = true;
-    this.showDialogue('festival');
-    this.showPassengerInfo('FESTIVAL MODE! Fares doubled!');
-    setTimeout(() => this.hidePassengerInfo(), 3000);
-
-    // Spawn decorative lights along roads
-    const festiveColors = [0xff4444, 0xffcc00, 0xff8800, 0x44ff44, 0xff44ff, 0x4488ff];
-    const roads = this.city.getRoadPositions();
-
-    for (let i = 0; i < Math.min(roads.length, 80); i++) {
-      if (Math.random() > 0.3) continue;
-      const rp = roads[i];
-
-      // String of small colored lights
-      const g = new THREE.Group();
-      for (let j = 0; j < 5; j++) {
-        const bulb = new THREE.Mesh(
-          new THREE.SphereGeometry(0.12, 4, 4),
-          new THREE.MeshBasicMaterial({
-            color: festiveColors[Math.floor(Math.random() * festiveColors.length)],
-          })
-        );
-        bulb.position.set((j - 2) * 1.2, 4 + Math.sin(j) * 0.3, 0);
-        g.add(bulb);
-      }
-
-      // Wire between bulbs
-      const wire = new THREE.Mesh(
-        new THREE.BoxGeometry(6, 0.03, 0.03),
-        new THREE.MeshBasicMaterial({ color: 0x333333 })
-      );
-      wire.position.y = 4.2;
-      g.add(wire);
-
-      g.position.set(rp.x, 0, rp.z);
-      g.rotation.y = Math.random() * Math.PI;
-      this.scene.add(g);
-      this.festivalLights.push(g);
-    }
-
-    // Add rangoli patterns on ground near temples
-    const tc = Math.floor(GRID_SIZE / 2);
-    const tcx = (tc - 0.5) * CELL_SIZE + CELL_SIZE / 2;
-    const tcz = (tc - 0.5) * CELL_SIZE + CELL_SIZE / 2;
-
-    for (let i = 0; i < 4; i++) {
-      const angle = (i / 4) * Math.PI * 2;
-      const rx = tcx + Math.cos(angle) * CELL_SIZE * 1.5;
-      const rz = tcz + Math.sin(angle) * CELL_SIZE * 1.5;
-
-      const rangoli = new THREE.Mesh(
-        new THREE.RingGeometry(1.5, 3, 8),
-        new THREE.MeshBasicMaterial({
-          color: festiveColors[i % festiveColors.length],
-          transparent: true,
-          opacity: 0.2,
-          side: THREE.DoubleSide,
-        })
-      );
-      rangoli.rotation.x = -Math.PI / 2;
-      rangoli.position.set(rx, 0.05, rz);
-      this.scene.add(rangoli);
-      this.festivalLights.push(rangoli);
-    }
-  }
-
-  // --- Vehicle Upgrades ---
-  applyUpgrades() {
-    const u = this.upgrades;
-    // Apply speed upgrade (each level adds 5% max speed)
-    this.vehicle.maxSpeedMod = 1 + u.speed * 0.05;
-    // Apply brake upgrade
-    this.vehicle.brakeMod = 1 + u.brakes * 0.08;
-    // Earnings multiplier stored for fare calculation
-    this.earningsMultiplier = 1 + u.earnings * 0.1;
-    // Boost duration mod
-    this.vehicle.boostDurationMod = 1 + u.boost * 0.1;
-  }
-
-  showUpgradeMenu() {
-    const u = this.upgrades;
-    const canAfford = (cost) => this.highScore >= cost; // Use high score as currency
-    const costs = { speed: (u.speed + 1) * 200, brakes: (u.brakes + 1) * 150, earnings: (u.earnings + 1) * 250, boost: (u.boost + 1) * 180 };
-    const maxLevel = 5;
-
-    let html = '<h1 style="font-size:36px;margin-bottom:8px">UPGRADES</h1>';
-    html += '<div style="font-size:13px;opacity:.4;margin-bottom:20px">Spend your high score earnings</div>';
-    html += `<div style="font-size:16px;color:#4ade80;margin-bottom:16px">Balance: Rs. ${this.highScore}</div>`;
-    html += '<div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center;max-width:500px;margin:0 auto">';
-
-    const items = [
-      { key: 'speed', label: 'Speed', icon: '⚡', desc: '+5% max speed' },
-      { key: 'brakes', label: 'Brakes', icon: '🛑', desc: '+8% brake force' },
-      { key: 'earnings', label: 'Earnings', icon: '💰', desc: '+10% fare bonus' },
-      { key: 'boost', label: 'Boost', icon: '🚀', desc: '+10% boost duration' },
-    ];
-
-    for (const item of items) {
-      const level = u[item.key];
-      const cost = costs[item.key];
-      const maxed = level >= maxLevel;
-      const affordable = canAfford(cost) && !maxed;
-      const bars = '█'.repeat(level) + '░'.repeat(maxLevel - level);
-      html += `<div class="upgrade-card" data-key="${item.key}" style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,${affordable ? '.25' : '.08'});border-radius:10px;padding:14px 18px;min-width:110px;cursor:${affordable ? 'pointer' : 'default'};pointer-events:auto;transition:all .2s;text-align:center">
-        <div style="font-size:24px">${item.icon}</div>
-        <div style="font-size:14px;font-weight:600;margin:4px 0">${item.label}</div>
-        <div style="font-size:11px;opacity:.4;letter-spacing:1px">${bars}</div>
-        <div style="font-size:10px;opacity:.35;margin-top:4px">${item.desc}</div>
-        <div style="font-size:12px;color:${maxed ? '#a78bfa' : (affordable ? '#4ade80' : '#ff6b6b')};margin-top:6px">${maxed ? 'MAXED' : `Rs. ${cost}`}</div>
-      </div>`;
-    }
-
-    html += '</div>';
-    html += '<div style="margin-top:24px;display:flex;gap:12px;justify-content:center">';
-    html += '<div id="btn-play-upgraded" class="menu-btn" style="border-color:#4ade80;background:rgba(74,222,128,.1);pointer-events:auto">PLAY</div>';
-    html += '</div>';
-
-    this.ui.overlay.innerHTML = html;
-    this.ui.overlay.classList.remove('hidden');
-
-    // Attach click handlers
-    for (const card of this.ui.overlay.querySelectorAll('.upgrade-card')) {
-      card.addEventListener('click', () => {
-        const key = card.dataset.key;
-        const cost = costs[key];
-        if (u[key] < maxLevel && this.highScore >= cost) {
-          this.highScore -= cost;
-          u[key]++;
-          localStorage.setItem('rickshaw-rush-upgrades', JSON.stringify(u));
-          localStorage.setItem('rickshaw-rush-hs', this.highScore.toString());
-          this.showUpgradeMenu(); // refresh
-        }
-      });
-    }
-
-    document.getElementById('btn-play-upgraded')?.addEventListener('click', () => {
-      this.setMode('single');
-      this.handleStart();
-    });
   }
 
   // --- Game Over ---
@@ -2620,7 +1737,6 @@ export class Game {
     this.ui.ammoWrap.style.display = 'none';
     this.ui.crosshair.classList.remove('active');
     this.ui.comboDisplay.classList.remove('visible');
-    this.ui.rainOverlay.classList.remove('active');
     this.hidePassengerInfo();
 
     const mpSb = document.getElementById('mp-scoreboard');
@@ -2631,20 +1747,6 @@ export class Game {
     this.projectiles.reset();
     this.effects.cleanup();
     this.trafficLights.endPowerCut();
-    for (const ev of this.activeEvents) {
-      for (const m of ev.meshes) removeAndDispose(this.scene, m);
-    }
-    this.activeEvents = [];
-    for (const cz of this.constructionZones) {
-      for (const m of cz.meshes) removeAndDispose(this.scene, m);
-    }
-    this.constructionZones = [];
-    for (const pc of this.pedestrianCrowds) {
-      for (const m of pc.meshes) removeAndDispose(this.scene, m);
-    }
-    this.pedestrianCrowds = [];
-    for (const fl of this.festivalLights) removeAndDispose(this.scene, fl);
-    this.festivalLights = [];
 
     // Clean remote players
     for (const rp of Object.values(this.remotePlayers)) rp.destroy();
@@ -2712,8 +1814,8 @@ export class Game {
         ${achHtml}
         <br>
         <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:16px">
-          <div id="btn-play-again" class="menu-btn" style="border-color:#4ade80;background:rgba(74,222,128,.1);pointer-events:auto">PLAY AGAIN</div>
-          <div id="btn-upgrades" class="menu-btn" style="border-color:#a78bfa;background:rgba(167,139,250,.1);pointer-events:auto">UPGRADES</div>
+          <div id="btn-play-again" class="menu-btn" style="border-color:#4ade80;background:rgba(74,222,128,.1);pointer-events:auto">PLAY AGAIN (R)</div>
+          <div id="btn-exit-gameover" class="menu-btn" style="border-color:#ff6b6b;background:rgba(255,107,107,.1);pointer-events:auto">EXIT TO MENU</div>
           <div id="btn-share" class="menu-btn" style="border-color:#22d3ee;background:rgba(34,211,238,.1);pointer-events:auto">SHARE</div>
         </div>
       `;
@@ -2724,8 +1826,8 @@ export class Game {
           this.setMode('single');
           this.handleStart();
         });
-        document.getElementById('btn-upgrades')?.addEventListener('click', () => {
-          this.showUpgradeMenu();
+        document.getElementById('btn-exit-gameover')?.addEventListener('click', () => {
+          this.returnToMenu();
         });
         document.getElementById('btn-share')?.addEventListener('click', () => {
           const text = `I scored ${this.score} pts in Rickshaw Rush! Race through Kathmandu! 🛺\n\nCan you beat me? #RickshawRush #vibejam`;
