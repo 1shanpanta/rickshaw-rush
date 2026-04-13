@@ -18,15 +18,18 @@ export class RivalAI {
     for (const r of this.rivals) r.target = dest.clone();
   }
 
-  spawn(count) {
-    const roads = this.city.getRoadPositions();
+  spawn(count, startPos) {
     for (let i = 0; i < count; i++) {
-      const rp = roads[Math.floor(Math.random() * roads.length)];
+      // Line up next to player at start — offset sideways
+      const offset = (i + 1) * 5;
+      const side = i % 2 === 0 ? 1 : -1;
+      const sx = startPos ? startPos.x + side * offset : this.city.getRoadPositions()[Math.floor(Math.random() * this.city.getRoadPositions().length)].x;
+      const sz = startPos ? startPos.z + (i + 1) * 3 : this.city.getRoadPositions()[Math.floor(Math.random() * this.city.getRoadPositions().length)].z;
       const color = RIVAL_COLORS[i % RIVAL_COLORS.length];
       const rival = {
         name: RIVAL_NAMES[i % RIVAL_NAMES.length],
-        position: new THREE.Vector3(rp.x, 0, rp.z),
-        rotation: Math.random() * Math.PI * 2,
+        position: new THREE.Vector3(sx, 0, sz),
+        rotation: startPos ? 0 : Math.random() * Math.PI * 2,
         speed: 0,
         maxSpeed: 16 + Math.random() * 6,
         target: this.destination ? this.destination.clone() : null,
@@ -110,41 +113,102 @@ export class RivalAI {
     return g;
   }
 
+  // Find next road waypoint toward destination using grid-based pathfinding
+  _getNextWaypoint(pos, dest) {
+    const gx = Math.floor(pos.x / CELL_SIZE);
+    const gz = Math.floor(pos.z / CELL_SIZE);
+    const tx = Math.floor(dest.x / CELL_SIZE);
+    const tz = Math.floor(dest.z / CELL_SIZE);
+
+    // If on a road, pick the neighbor road cell closest to destination
+    let bestDx = 0, bestDz = 0, bestDist = Infinity;
+    const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+    for (const [ddx, ddz] of dirs) {
+      const nx = gx + ddx;
+      const nz = gz + ddz;
+      if (nx < 0 || nx >= GRID_SIZE || nz < 0 || nz >= GRID_SIZE) continue;
+      if (!this.city.isRoad(nx, nz)) continue;
+      const d = Math.abs(nx - tx) + Math.abs(nz - tz);
+      if (d < bestDist) { bestDist = d; bestDx = ddx; bestDz = ddz; }
+    }
+
+    // If no good road neighbor, try any direction toward target
+    if (bestDist === Infinity) {
+      bestDx = tx > gx ? 1 : tx < gx ? -1 : 0;
+      bestDz = tz > gz ? 1 : tz < gz ? -1 : 0;
+    }
+
+    return {
+      x: (gx + bestDx) * CELL_SIZE + CELL_SIZE / 2,
+      z: (gz + bestDz) * CELL_SIZE + CELL_SIZE / 2,
+    };
+  }
+
   update(delta, buildingBounds, gameTime) {
     for (const r of this.rivals) {
       if (r.finished) continue;
 
       // Slow debuff from bullets
-      if (r.slowTimer > 0) {
-        r.slowTimer -= delta;
-      }
+      if (r.slowTimer > 0) r.slowTimer -= delta;
       const speedMult = r.slowTimer > 0 ? 0.3 : 1;
 
-      if (!r.target && this.destination) r.target = this.destination.clone();
-      if (!r.target) continue;
+      if (!this.destination) continue;
 
-      // Steer toward destination
-      const dx = r.target.x - r.position.x;
-      const dz = r.target.z - r.position.z;
-      const dist = Math.sqrt(dx * dx + dz * dz);
+      // Get road-following waypoint (updated every ~0.5s or when close)
+      if (!r._waypoint || r._wpTimer <= 0 ||
+          Math.abs(r.position.x - r._waypoint.x) < 5 && Math.abs(r.position.z - r._waypoint.z) < 5) {
+        r._waypoint = this._getNextWaypoint(r.position, this.destination);
+        r._wpTimer = 0.4 + Math.random() * 0.3;
+      }
+      r._wpTimer -= delta;
+
+      // Close to final destination? Steer direct
+      const destDx = this.destination.x - r.position.x;
+      const destDz = this.destination.z - r.position.z;
+      const destDist = Math.sqrt(destDx * destDx + destDz * destDz);
+
+      // Steer toward waypoint (or direct to destination if close)
+      const steerTarget = destDist < CELL_SIZE * 2 ? this.destination : r._waypoint;
+      const dx = steerTarget.x - r.position.x;
+      const dz = steerTarget.z - r.position.z;
       const desiredRot = Math.atan2(dx, dz);
 
       // Smooth rotation
       let rotDiff = desiredRot - r.rotation;
       while (rotDiff > Math.PI) rotDiff -= Math.PI * 2;
       while (rotDiff < -Math.PI) rotDiff += Math.PI * 2;
-      r.rotation += rotDiff * Math.min(3.5 * delta, 1);
+      r.rotation += rotDiff * Math.min(4 * delta, 1);
 
-      // Speed — slow near destination
-      const targetSpeed = (dist > 15 ? r.maxSpeed : r.maxSpeed * 0.4) * speedMult;
+      // Speed
+      const targetSpeed = (destDist > 15 ? r.maxSpeed : r.maxSpeed * 0.4) * speedMult;
       r.speed += (targetSpeed - r.speed) * Math.min(4 * delta, 1);
 
       // Move
       r.position.x += Math.sin(r.rotation) * r.speed * delta;
       r.position.z += Math.cos(r.rotation) * r.speed * delta;
 
-      // Building collisions
-      this.handleBuildingCollisions(r, buildingBounds);
+      // Stay on roads — if off-road, steer to nearest road
+      const gx = Math.floor(r.position.x / CELL_SIZE);
+      const gz = Math.floor(r.position.z / CELL_SIZE);
+      if (!this.city.isRoad(gx, gz)) {
+        // Find nearest road cell
+        let nearX = gx, nearZ = gz, nearDist = Infinity;
+        for (let ox = -2; ox <= 2; ox++) {
+          for (let oz = -2; oz <= 2; oz++) {
+            if (this.city.isRoad(gx + ox, gz + oz)) {
+              const d = ox * ox + oz * oz;
+              if (d < nearDist) { nearDist = d; nearX = gx + ox; nearZ = gz + oz; }
+            }
+          }
+        }
+        // Steer toward nearest road center
+        const roadX = nearX * CELL_SIZE + CELL_SIZE / 2;
+        const roadZ = nearZ * CELL_SIZE + CELL_SIZE / 2;
+        const toDx = roadX - r.position.x;
+        const toDz = roadZ - r.position.z;
+        r.position.x += toDx * 3 * delta;
+        r.position.z += toDz * 3 * delta;
+      }
 
       // City bounds
       const citySize = GRID_SIZE * CELL_SIZE;
@@ -156,7 +220,7 @@ export class RivalAI {
       r.mesh.rotation.y = r.rotation;
 
       // Check if reached destination
-      if (dist < 8) {
+      if (destDist < 8) {
         r.finished = true;
         r.finishTime = gameTime;
       }

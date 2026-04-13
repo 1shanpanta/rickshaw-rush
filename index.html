@@ -28,9 +28,6 @@
     .hud-timer .hud-big{text-align:right}
     .hud-timer .hud-big.warn{color:#ff6b6b;animation:pulse .5s ease-in-out infinite}
 
-    /* --- Stars row --- */
-    #stars-earned{color:#fbbf24;font-size:13px;margin-top:2px;letter-spacing:1px}
-
     /* --- Ammo display --- */
     #ammo-wrap{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);pointer-events:none;z-index:10;display:none;text-align:center}
     #ammo-wrap{display:none!important}
@@ -54,8 +51,6 @@
     #speedo.active{opacity:1}
     #speedo-value{font-size:28px;font-weight:700;color:#fff;line-height:1;text-shadow:0 2px 6px rgba(0,0,0,.5)}
     #speedo-unit{font-size:10px;color:rgba(255,255,255,.4);text-transform:uppercase}
-    #speedo-bar-wrap{display:none}
-    #speedo-bar{display:none}
 
     /* --- Boost gauge (minimal, bottom-right) --- */
     #boost-wrap{position:fixed;right:20px;bottom:80px;pointer-events:none;z-index:10;display:none;text-align:center;opacity:0;transition:opacity .3s}
@@ -64,12 +59,6 @@
     #boost-bar-wrap{width:4px;height:60px;background:rgba(255,255,255,.08);border-radius:2px;overflow:hidden;position:relative;margin:0 auto}
     #boost-bar{position:absolute;bottom:0;width:100%;background:linear-gradient(to top,#22d3ee,#a78bfa);border-radius:2px;transition:height .15s}
     #boost-status{font-size:9px;color:rgba(255,255,255,.25);margin-top:3px}
-
-    /* --- Fare meter (hidden — score is enough) --- */
-    #fare-panel{display:none!important}
-    #fare-label{display:none}
-    #fare-value{display:none}
-    #fare-surge{display:none}
 
     /* --- Combo --- */
     #combo-display{position:fixed;top:76px;left:50%;transform:translateX(-50%);font-size:22px;font-weight:700;color:#fbbf24;pointer-events:none;z-index:10;opacity:0;transition:opacity .3s;text-shadow:0 0 20px rgba(251,191,36,.5)}
@@ -217,12 +206,11 @@
   </style>
 </head>
 <body>
-  <!-- HUD — Crazy Taxi inspired: score left, timer right, clean -->
+  <!-- HUD — score left, timer right -->
   <div id="hud">
     <div class="hud-score">
-      <div class="hud-big" id="score">Rs. 0</div>
-      <div class="hud-sub"><span id="deliveries">0</span> deliveries &middot; Lv.<span id="level-num">1</span></div>
-      <div id="stars-earned" style="font-size:11px;color:#fbbf24;margin-top:1px"></div>
+      <div class="hud-big" id="score">0 pts</div>
+      <div class="hud-sub">Round <span id="deliveries">1</span> of <span id="level-num">3</span></div>
     </div>
     <div class="hud-timer">
       <div class="hud-big" id="timer">2:30</div>
@@ -238,7 +226,6 @@
   <div id="speedo">
     <div id="speedo-value">0</div>
     <div id="speedo-unit">km/h</div>
-    <div id="speedo-bar-wrap"><div id="speedo-bar" style="height:0%"></div></div>
   </div>
 
   <!-- Boost gauge -->
@@ -246,13 +233,6 @@
     <div id="boost-label">Boost</div>
     <div id="boost-bar-wrap"><div id="boost-bar" style="height:100%"></div></div>
     <div id="boost-status">SHIFT</div>
-  </div>
-
-  <!-- Fare meter -->
-  <div id="fare-panel">
-    <div id="fare-label">Fare</div>
-    <div id="fare-value">Rs. 14</div>
-    <div id="fare-surge"></div>
   </div>
 
   <!-- Overlays -->

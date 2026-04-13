@@ -3,16 +3,14 @@ import { City } from './City.js';
 import { Vehicle } from './Vehicle.js';
 import { Traffic } from './Traffic.js';
 import { TrafficLights } from './TrafficLights.js';
-// Passenger system disabled — race mode
 import { Wildlife } from './Wildlife.js';
 import { Projectiles } from './Projectiles.js';
-// Navigation arrows disabled — using HUD arrow
 import { MusicSystem } from './Music.js';
 import { RemotePlayer } from './RemotePlayer.js';
 import { RivalAI } from './RivalAI.js';
 import { Effects } from './Effects.js';
 import { Police } from './Police.js';
-import { GAME, CELL_SIZE, GRID_SIZE, TRAFFIC_LIGHT, LEVELS, MAPS } from './constants.js';
+import { GAME, CELL_SIZE, GRID_SIZE, TRAFFIC_LIGHT, MAPS } from './constants.js';
 import { removeAndDispose } from './utils.js';
 
 // --- State machine ---
@@ -72,6 +70,7 @@ export class Game {
     this.gameTime = 0;
     this.violations = 0;
     this.fines = 0;
+    this.nearMisses = 0;
     this.highScore = parseInt(localStorage.getItem('rickshaw-rush-hs') || '0', 10);
     this.topScores = JSON.parse(localStorage.getItem('rickshaw-rush-top5') || '[]');
 
@@ -216,21 +215,12 @@ export class Game {
     this.trafficLights = new TrafficLights(scene, this.city);
     this.vehicle = new Vehicle(scene);
     this.traffic = new Traffic(scene, this.city, this.trafficLights);
-    // Passengers disabled — race mode
     this.wildlife = new Wildlife(scene, this.city);
     this.projectiles = new Projectiles(scene);
-    // Navigation ground arrows disabled — using HUD arrow
     this.rivalAI = new RivalAI(scene, this.city);
     this.music = new MusicSystem();
     this.effects = new Effects(scene);
     this.police = new Police(scene, this.city, null); // music ref set after init
-
-    // Freeze state (police caught)
-
-    // Exhaust particles
-    this.exhaustParticles = [];
-    this.exhaustTimer = 0;
-
 
     // Particles
     this.createDustParticles();
@@ -243,7 +233,6 @@ export class Game {
       timer: document.getElementById('timer'),
       deliveries: document.getElementById('deliveries'),
       levelNum: document.getElementById('level-num'),
-      starsEarned: document.getElementById('stars-earned'),
       overlay: document.getElementById('screen-overlay'),
       passengerInfo: document.getElementById('passenger-info'),
       passengerText: document.getElementById('passenger-text'),
@@ -253,14 +242,10 @@ export class Game {
       controlsHint: document.getElementById('controls-hint'),
       minimap: document.getElementById('minimap'),
       speedoValue: document.getElementById('speedo-value'),
-      speedoBar: document.getElementById('speedo-bar'),
       speedo: document.getElementById('speedo'),
       boostBar: document.getElementById('boost-bar'),
       boostWrap: document.getElementById('boost-wrap'),
       boostStatus: document.getElementById('boost-status'),
-      farePanel: document.getElementById('fare-panel'),
-      fareValue: document.getElementById('fare-value'),
-      fareSurge: document.getElementById('fare-surge'),
       violationFlash: document.getElementById('violation-flash'),
       violationText: document.getElementById('violation-text'),
       levelUp: document.getElementById('level-up'),
@@ -365,7 +350,7 @@ export class Game {
   }
 
   handleRemoteScore(data) {
-    this.remoteScores[data.id] = { score: data.score, deliveries: data.deliveries, name: data.name };
+    this.remoteScores[data.id] = { score: data.score, name: data.name };
   }
 
   handleRemoteBalloon(data) {
@@ -448,6 +433,7 @@ export class Game {
     this.gameTime = 0;
     this.violations = 0;
     this.fines = 0;
+    this.nearMisses = 0;
     this.isRaining = false;
     this.rainCooldown = 30;
 
@@ -498,7 +484,7 @@ export class Game {
     this.scene.add(this._destMarker);
 
     this.rivalAI.setDestination(this.raceDestination);
-    this.rivalAI.spawn(3);
+    this.rivalAI.spawn(3, start);
 
     // Clean time bonuses
     for (const tb of this.timeBonuses) removeAndDispose(this.scene, tb.mesh);
@@ -561,6 +547,11 @@ export class Game {
     this.rainParticles.visible = false;
     this.projectiles.reset();
 
+    // Race countdown (3, 2, 1, GO!)
+    this._countdownTimer = 3.5;
+    this._countdownFrozen = true;
+    this._showCountdown(3);
+
     // Online mode: clean remote players, show MP scoreboard
     if (this.mode === 'online') {
       for (const id of Object.keys(this.remotePlayers)) {
@@ -615,7 +606,6 @@ export class Game {
       this.ui.minimap.style.display = 'none';
       this.ui.ammoWrap.style.display = 'none';
       this.ui.controlsHint.style.display = 'none';
-      this.ui.farePanel.style.display = 'none';
       this.photoOrbitAngle = this.vehicle.rotation;
     } else {
       this.ui.photoModeEl?.classList.remove('active');
@@ -641,6 +631,21 @@ export class Game {
         vPos.z + Math.cos(this.photoOrbitAngle) * dist
       );
       this.camera.lookAt(vPos.x, 2, vPos.z);
+      return;
+    }
+
+    // Race countdown
+    if (this._countdownFrozen) {
+      const prevSec = Math.ceil(this._countdownTimer);
+      this._countdownTimer -= delta;
+      const curSec = Math.ceil(this._countdownTimer);
+      if (curSec !== prevSec && curSec > 0) this._showCountdown(curSec);
+      if (this._countdownTimer <= 0) {
+        this._countdownFrozen = false;
+        this._showCountdown(0); // "GO!"
+      }
+      this.updateCamera(delta);
+      this.updateUI();
       return;
     }
 
@@ -700,10 +705,6 @@ export class Game {
     this.wildlife.update(delta, this.vehicle.position);
 
     // Pigeon scatter
-    if (this.city.pigeonGroups) this.updatePigeonScatter(delta);
-
-    // Passengers disabled in race mode
-
     // Rival AI racers
     this.rivalAI.update(delta, this.city.getNearbyBuildings(this.vehicle.position.x, this.vehicle.position.z), this.gameTime);
 
@@ -785,9 +786,6 @@ export class Game {
       }
     }
 
-    // Exhaust particles
-    this.updateExhaust(delta);
-
     // Drift scoring
     this.updateDrift(delta, input);
 
@@ -804,9 +802,6 @@ export class Game {
 
     // Effects update (celebrations, sparks, debris, tire marks)
     this.effects.update(delta);
-
-    // Speed trail update
-    // Speed trail removed
 
     // Chromatic aberration on boost
     if (this.caPass) {
@@ -915,7 +910,6 @@ export class Game {
       if (Math.floor(this.gameTime * 2) !== Math.floor((this.gameTime - delta) * 2)) {
         this.network.sendScoreUpdate({
           score: this.score,
-          deliveries: this.deliveries,
           name: this.network.players.find(p => p.id === this.network.playerId)?.name || 'You',
         });
       }
@@ -944,7 +938,8 @@ export class Game {
     this.ui.powercutOverlay?.classList.toggle('active', this.trafficLights.isPowerCut());
 
     if (this.mode === 'single') {
-      this.updateMinimap();
+      this._minimapFrame = (this._minimapFrame || 0) + 1;
+      if (this._minimapFrame % 2 === 0) this.updateMinimap();
       if (this.fullmapOpen) this.drawFullmap();
     }
   }
@@ -979,12 +974,12 @@ export class Game {
     // Build scoreboard
     const myName = this.network?.players.find(p => p.id === this.network.playerId)?.name || 'You';
     const allScores = [
-      { name: myName, score: this.score, dels: this.deliveries, me: true },
-      ...Object.values(this.remoteScores).map(s => ({ name: s.name, score: s.score, dels: s.deliveries, me: false })),
+      { name: myName, score: this.score, me: true },
+      ...Object.values(this.remoteScores).map(s => ({ name: s.name, score: s.score, me: false })),
     ].sort((a, b) => b.score - a.score);
 
     mpScores.innerHTML = allScores.map(s =>
-      `<span style="opacity:${s.me ? '1' : '.6'};${s.me ? 'color:#4ade80' : ''}">${s.name}: Rs.${s.score} (${s.dels})</span>`
+      `<span style="opacity:${s.me ? '1' : '.6'};${s.me ? 'color:#4ade80' : ''}">${s.name}: ${s.score} pts</span>`
     ).join(' | ');
   }
 
@@ -1142,89 +1137,6 @@ export class Game {
     this.wasInRedZone = isInRedZone;
   }
 
-  // --- Passenger events ---
-  handlePassengerEvent(result) {
-    if (result.type === 'pickup') {
-      const dialogue = this.getDialogue('pickup');
-      this.showPassengerInfo(`${result.name}: "${dialogue}" -- to ${result.destination}`);
-      this.ui.farePanel.style.display = 'block';
-      this.music.playPickup();
-      setTimeout(() => this.hidePassengerInfo(), 3500);
-    } else if (result.type === 'delivered') {
-      this.combo = Math.min(this.combo + 1, GAME.comboMultipliers.length - 1);
-      this.comboTimer = GAME.comboWindow;
-      const mult = GAME.comboMultipliers[this.combo];
-      const festivalBonus = this.festivalMode ? 2 : 1;
-      const earningsMod = this.earningsMultiplier || 1;
-      const finalReward = Math.round(result.reward * mult * festivalBonus * earningsMod);
-
-      this.score += finalReward;
-      this.deliveries++;
-      this.totalStars += result.stars;
-
-      const comboText = this.combo > 0 ? ` (x${mult} COMBO!)` : '';
-      const delivDialogue = this.getDialogue('delivery');
-      this.showPassengerInfo(`"${delivDialogue}" +Rs. ${finalReward}${comboText}`);
-      this.showStarRating(result.stars);
-
-      if (this.combo > 0) {
-        this.ui.comboDisplay.textContent = `COMBO x${mult}`;
-        this.ui.comboDisplay.classList.add('visible');
-      }
-
-      this.ui.farePanel.style.display = 'none';
-      this.projectiles.refillAmmo(2);
-
-      // Celebration effects!
-      this.effects.spawnCelebration(this.vehicle.position);
-      if (this.music.playCelebration) {
-        this.music.playCelebration();
-      } else {
-        this.music.playDelivery();
-      }
-
-      // Combo milestone flash
-      if (this.combo >= 2) {
-        this.effects.spawnComboFlash();
-        if (this.music.setComboLevel) this.music.setComboLevel(this.combo);
-      }
-
-      setTimeout(() => this.hidePassengerInfo(), 2500);
-
-      // Level up check
-      if (this.deliveries > 0 && this.deliveries % LEVELS.deliveriesPerLevel === 0) {
-        this.levelUp();
-      }
-    } else if (result.type === 'timeout') {
-      this.combo = 0;
-      this.comboTimer = 0;
-      this.ui.comboDisplay.classList.remove('visible');
-      this.ui.farePanel.style.display = 'none';
-      this.showPassengerInfo('Passenger left! Too slow...');
-      setTimeout(() => this.hidePassengerInfo(), 2000);
-    }
-  }
-
-  levelUp() {
-    this.level++;
-    this.traffic.addMore(LEVELS.extraTraffic);
-    // Race mode — no extra rivals on level up
-
-    const el = this.ui.levelUp;
-    el.textContent = `LEVEL ${this.level}!`;
-    el.style.animation = 'none';
-    el.offsetHeight;
-    el.style.animation = 'levelUpAnim 1.5s ease-out forwards';
-
-    // Trigger rain at certain levels
-    if (this.level === 3 && !this.isRaining) this.startRain();
-
-    // Festival mode at level 5+
-    if (this.level >= 5 && !this.festivalMode) {
-      this.activateFestivalMode();
-    }
-  }
-
   // --- Weather ---
   updateWeather(delta) {
     this.rainCooldown -= delta;
@@ -1244,9 +1156,8 @@ export class Game {
     this.vehicle.gripMultiplier = 0.65;
     this.rainParticles.visible = true;
     this.ui.rainOverlay.classList.add('active');
-    this.ui.fareSurge.textContent = 'SURGE x1.5';
     if (this.music.startRainSound) this.music.startRainSound();
-    this.showPassengerInfo('Monsoon rain! Fares surge, roads slippery!');
+    this.showPassengerInfo('Monsoon rain! Roads slippery!');
     this.showDialogue('rain');
     setTimeout(() => this.hidePassengerInfo(), 2500);
   }
@@ -1257,9 +1168,9 @@ export class Game {
     this.vehicle.gripMultiplier = 1;
     this.rainParticles.visible = false;
     this.ui.rainOverlay.classList.remove('active');
-    this.ui.fareSurge.textContent = '';
     if (this.music.stopRainSound) this.music.stopRainSound();
   }
+
 
   updateRainParticles(delta) {
     const arr = this.rainParticles.geometry.attributes.position.array;
@@ -1398,6 +1309,27 @@ export class Game {
   }
 
   // --- UI ---
+  _showCountdown(num) {
+    let el = document.getElementById('countdown-display');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'countdown-display';
+      el.style.cssText = 'position:fixed;top:40%;left:50%;transform:translate(-50%,-50%);z-index:25;pointer-events:none;text-align:center;color:#fff;font-size:80px;font-weight:700;text-shadow:0 4px 20px rgba(0,0,0,.7);transition:transform .3s,opacity .3s';
+      document.body.appendChild(el);
+    }
+    if (num > 0) {
+      el.textContent = Math.ceil(num);
+      el.style.opacity = '1';
+      el.style.transform = 'translate(-50%,-50%) scale(1.2)';
+      setTimeout(() => { el.style.transform = 'translate(-50%,-50%) scale(1)'; }, 100);
+    } else {
+      el.textContent = 'GO!';
+      el.style.color = '#4ade80';
+      el.style.opacity = '1';
+      setTimeout(() => { el.style.opacity = '0'; }, 800);
+    }
+  }
+
   updateRacePosition() {
     const positions = this.rivalAI.getPositions(
       this.vehicle.position, this.playerFinished, this.playerFinishTime, this.gameTime
@@ -1470,52 +1402,6 @@ export class Game {
     // Crosshair visibility
     const fast = Math.abs(this.vehicle.speed) > 10;
     this.ui.crosshair.classList.toggle('active', fast);
-  }
-
-  // --- Exhaust ---
-  updateExhaust(delta) {
-    const speed = Math.abs(this.vehicle.speed);
-    if (speed < 3) return;
-
-    this.exhaustTimer += delta;
-    const interval = speed > 30 ? 0.03 : 0.06;
-
-    if (this.exhaustTimer > interval) {
-      this.exhaustTimer = 0;
-      const rot = this.vehicle.rotation;
-      const pos = this.vehicle.position;
-
-      const puff = new THREE.Mesh(
-        new THREE.SphereGeometry(0.15 + Math.random() * 0.15, 4, 4),
-        new THREE.MeshBasicMaterial({
-          color: this.vehicle.boosting ? 0xff6600 : 0x888888,
-          transparent: true,
-          opacity: 0.3,
-        })
-      );
-
-      puff.position.set(
-        pos.x - Math.sin(rot) * 2.5 + (Math.random() - 0.5) * 0.3,
-        0.6 + Math.random() * 0.3,
-        pos.z - Math.cos(rot) * 2.5 + (Math.random() - 0.5) * 0.3
-      );
-      this.scene.add(puff);
-      this.exhaustParticles.push({ mesh: puff, life: 0.6 });
-    }
-
-    // Update existing puffs
-    for (let i = this.exhaustParticles.length - 1; i >= 0; i--) {
-      const p = this.exhaustParticles[i];
-      p.life -= delta;
-      p.mesh.position.y += delta * 1.5;
-      p.mesh.scale.multiplyScalar(1 + delta * 2);
-      p.mesh.material.opacity -= delta * 0.5;
-
-      if (p.life <= 0) {
-        removeAndDispose(this.scene, p.mesh);
-        this.exhaustParticles.splice(i, 1);
-      }
-    }
   }
 
   // --- Drift ---
@@ -2090,74 +1976,6 @@ export class Game {
     el.style.animation = 'violationTextAnim 1.2s ease-out forwards';
   }
 
-  showStarRating(stars) {
-    const el = this.ui.starPopup;
-    el.textContent = stars > 0 ? '★'.repeat(stars) + '☆'.repeat(3 - stars) : '☆☆☆';
-    el.style.color = stars >= 3 ? '#fbbf24' : stars >= 2 ? '#fb923c' : '#ef4444';
-    el.style.animation = 'none';
-    el.offsetHeight;
-    el.style.animation = 'starAnim 1.5s ease-out forwards';
-  }
-
-  // --- Speed Trail ---
-  // Speed trail removed — was the cyan/green line behind the vehicle
-
-  // --- Pigeon Scatter ---
-  updatePigeonScatter(delta) {
-    const vPos = this.vehicle.position;
-    const speed = Math.abs(this.vehicle.speed);
-    if (speed < 5) return;
-
-    for (const group of this.city.pigeonGroups) {
-      const dx = vPos.x - group.position.x;
-      const dz = vPos.z - group.position.z;
-      const dist = dx * dx + dz * dz;
-
-      if (dist < 64 && !group.scattered) {
-        group.scattered = true;
-        group.scatterTimer = 3;
-        for (const pigeon of group.meshes) {
-          pigeon.userData.scatterVY = 3 + Math.random() * 4;
-          pigeon.userData.scatterVX = (Math.random() - 0.5) * 6;
-          pigeon.userData.scatterVZ = (Math.random() - 0.5) * 6;
-          pigeon.userData.scatterSpin = (Math.random() - 0.5) * 8;
-        }
-      }
-
-      if (group.scattered) {
-        group.scatterTimer -= delta;
-        for (const pigeon of group.meshes) {
-          if (pigeon.userData.scatterVY !== undefined) {
-            pigeon.position.x += pigeon.userData.scatterVX * delta;
-            pigeon.position.y += pigeon.userData.scatterVY * delta;
-            pigeon.position.z += pigeon.userData.scatterVZ * delta;
-            pigeon.rotation.z += pigeon.userData.scatterSpin * delta;
-            pigeon.userData.scatterVY -= 3 * delta;
-          }
-        }
-        // Reset after timer
-        if (group.scatterTimer <= 0) {
-          group.scattered = false;
-          for (const pigeon of group.meshes) {
-            // Return to ground near original position
-            const angle = Math.random() * Math.PI * 2;
-            const r = Math.random() * 3;
-            pigeon.position.set(
-              group.position.x + Math.cos(angle) * r,
-              0,
-              group.position.z + Math.sin(angle) * r
-            );
-            pigeon.rotation.z = 0;
-            pigeon.rotation.y = Math.random() * Math.PI * 2;
-            delete pigeon.userData.scatterVY;
-            delete pigeon.userData.scatterVX;
-            delete pigeon.userData.scatterVZ;
-            delete pigeon.userData.scatterSpin;
-          }
-        }
-      }
-    }
-  }
 
   // --- Dynamic Events ---
   updateDynamicEvents(delta) {
@@ -2787,7 +2605,7 @@ export class Game {
         localStorage.setItem('rickshaw-rush-hs', this.score.toString());
       }
       // Top 5 scores
-      this.topScores.push({ score: this.score, deliveries: this.deliveries, level: this.level, date: new Date().toLocaleDateString() });
+      this.topScores.push({ score: this.score, date: new Date().toLocaleDateString() });
       this.topScores.sort((a, b) => b.score - a.score);
       this.topScores = this.topScores.slice(0, 5);
       localStorage.setItem('rickshaw-rush-top5', JSON.stringify(this.topScores));
@@ -2799,7 +2617,6 @@ export class Game {
     this.ui.minimap.style.display = 'none';
     this.ui.speedo.style.display = 'none';
     this.ui.boostWrap.style.display = 'none';
-    this.ui.farePanel.style.display = 'none';
     this.ui.ammoWrap.style.display = 'none';
     this.ui.crosshair.classList.remove('active');
     this.ui.comboDisplay.classList.remove('visible');
@@ -2818,8 +2635,6 @@ export class Game {
       for (const m of ev.meshes) removeAndDispose(this.scene, m);
     }
     this.activeEvents = [];
-    for (const p of this.exhaustParticles) removeAndDispose(this.scene, p.mesh);
-    this.exhaustParticles = [];
     for (const cz of this.constructionZones) {
       for (const m of cz.meshes) removeAndDispose(this.scene, m);
     }
@@ -2839,16 +2654,14 @@ export class Game {
       // --- Online multiplayer game over ---
       const myName = this.network?.players.find(p => p.id === this.network?.playerId)?.name || 'You';
       const allScores = [
-        { name: myName, score: this.score, dels: this.deliveries, stars: this.totalStars, me: true },
-        ...Object.values(this.remoteScores).map(s => ({
-          name: s.name, score: s.score, dels: s.deliveries, stars: 0, me: false,
-        })),
+        { name: myName, score: this.score, me: true },
+        ...Object.values(this.remoteScores).map(s => ({ name: s.name, score: s.score, me: false })),
       ].sort((a, b) => b.score - a.score);
 
       const leaderboard = allScores.map((s, i) => {
         const medal = i === 0 ? '&#x1F451;' : '';
         const style = s.me ? 'color:#4ade80;font-weight:700' : 'opacity:.7';
-        return `<div style="${style};font-size:18px;line-height:2">${medal} ${i + 1}. ${s.name} -- Rs. ${s.score} (${s.dels} deliveries)</div>`;
+        return `<div style="${style};font-size:18px;line-height:2">${medal} ${i + 1}. ${s.name} — ${s.score} pts</div>`;
       }).join('');
 
       const iWon = allScores[0]?.me;
@@ -2861,22 +2674,14 @@ export class Game {
 
       this.network?.disconnect();
     } else {
-      // --- Solo game over ---
-      const avgReward = this.deliveries > 0 ? Math.round(this.score / this.deliveries) : 0;
-      const maxStars = this.deliveries * 3;
+      // --- Solo race game over ---
       const isNewHigh = this.score >= this.highScore && this.score > 0;
 
       const achievements = [];
-      if (this.deliveries >= 5) achievements.push('Busy Driver');
-      if (this.deliveries >= 10) achievements.push('Road Warrior');
       if (this.nearMisses >= 5) achievements.push('Close Caller');
-      if (this.totalStars >= 9) achievements.push('Star Collector');
-      if (this.violations === 0 && this.deliveries > 0) achievements.push('Law Abiding');
-      if (this.level >= 4) achievements.push('Level Boss');
-      if (this.level >= 5) achievements.push('Festival Rider');
       if (this.score >= 1000) achievements.push('Rs. 1000 Club');
       if (this.fines === 0 && this.violations === 0) achievements.push('Clean Record');
-      if (this.deliveries >= 15) achievements.push('Kathmandu Legend');
+      if (this.score >= 1500) achievements.push('Kathmandu Legend');
 
       const achHtml = achievements.length > 0
         ? `<div class="overlay-achievements">${achievements.map(a =>
@@ -2888,7 +2693,7 @@ export class Game {
         ? `<div style="margin-top:12px;font-size:13px;opacity:.5">
             <div style="margin-bottom:4px;letter-spacing:1px;text-transform:uppercase;font-size:10px;opacity:.6">TOP SCORES</div>
             ${this.topScores.map((s, i) =>
-              `<div style="${s.score === this.score && s.deliveries === this.deliveries ? 'color:#4ade80' : ''}">${i + 1}. Rs. ${s.score} - Lv.${s.level} (${s.deliveries} del)</div>`
+              `<div style="${s.score === this.score ? 'color:#4ade80' : ''}">${i + 1}. ${s.score} pts &middot; ${s.date}</div>`
             ).join('')}
           </div>`
         : '';
@@ -2896,14 +2701,12 @@ export class Game {
       this.ui.overlay.innerHTML = `
         <h1>${this.policeCaught ? 'BUSTED!' : isNewHigh ? 'NEW HIGH SCORE!' : "TIME'S UP!"}</h1>
         ${this.policeCaught ? '<div style="font-size:16px;color:#ff6b6b;margin-bottom:8px">Caught by police — Rs. 500 fine deducted</div>' : ''}
-        <div class="overlay-final-score">Rs. ${this.score}</div>
+        <div class="overlay-final-score">${this.score} pts</div>
         <div class="overlay-stats">
-          Level reached: ${this.level}<br>
-          Deliveries: ${this.deliveries}<br>
-          Stars: ${'★'.repeat(this.totalStars)}${'☆'.repeat(Math.max(0, maxStars - this.totalStars))} (${this.totalStars}/${maxStars})<br>
+          Rounds: ${Math.min(this.currentRound - 1, this.totalRounds)} / ${this.totalRounds}<br>
           Near misses: ${this.nearMisses}<br>
           Violations: ${this.violations} (Fines: Rs. ${this.fines})<br>
-          Avg per delivery: Rs. ${avgReward}
+          Best score: ${this.highScore} pts
         </div>
         ${top5Html}
         ${achHtml}
@@ -2925,7 +2728,7 @@ export class Game {
           this.showUpgradeMenu();
         });
         document.getElementById('btn-share')?.addEventListener('click', () => {
-          const text = `I scored Rs. ${this.score} in Rickshaw Rush! ${this.deliveries} deliveries, Level ${this.level} 🛺\n\nCan you beat me? #RickshawRush #vibejam`;
+          const text = `I scored ${this.score} pts in Rickshaw Rush! Race through Kathmandu! 🛺\n\nCan you beat me? #RickshawRush #vibejam`;
           const url = window.location.href;
           window.open(`https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`, '_blank');
         });

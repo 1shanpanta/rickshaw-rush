@@ -37,19 +37,6 @@ export const GAME = {
   totalTime: 150,
   nearMissBonus: 25,
   nearMissDistance: 3.5,
-  comboWindow: 15,
-  comboMultipliers: [1, 1.5, 2, 2.5, 3],
-};
-
-export const FARE = {
-  baseFare: 14,
-  ratePerUnit: 0.6,
-  surgeMult: 1.5,
-};
-
-export const RATING = {
-  timeThreshold: 28,
-  tipMultipliers: [0.75, 1, 1.25, 1.6],
 };
 
 export const TRAFFIC_LIGHT = {
@@ -57,11 +44,6 @@ export const TRAFFIC_LIGHT = {
   yellowDuration: 2,
   redDuration: 8,
   fineAmount: 50,
-};
-
-export const LEVELS = {
-  deliveriesPerLevel: 3,
-  extraTraffic: 2,
 };
 
 export const MUSIC = {
